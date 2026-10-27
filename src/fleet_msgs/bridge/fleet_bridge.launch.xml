@@ -1,0 +1,22 @@
+<!--
+  서버 노트북에서 로봇별 domain_bridge를 함께 띄운다. (Python launch 대신 XML)
+
+  실행:
+    source ~/ros2_ws/install/setup.bash          # fleet_msgs 포함
+    ros2 launch ~/ros-repo-2/fleet_msgs/bridge/fleet_bridge.launch.xml                     # 3대 모두
+    ros2 launch ~/ros-repo-2/fleet_msgs/bridge/fleet_bridge.launch.xml pinky3:=false       # 일부 끄기
+
+  로봇을 늘리면 <robot_id>_bridge.yaml을 만들고 아래에 arg 하나, node 하나를 추가한다.
+-->
+<launch>
+  <arg name="pinky1" default="true"/>
+  <arg name="pinky2" default="true"/>
+  <arg name="pinky3" default="true"/>
+
+  <node pkg="domain_bridge" exec="domain_bridge" name="pinky1_fleet_bridge" output="screen"
+        args="$(dirname)/pinky1_bridge.yaml" if="$(var pinky1)"/>
+  <node pkg="domain_bridge" exec="domain_bridge" name="pinky2_fleet_bridge" output="screen"
+        args="$(dirname)/pinky2_bridge.yaml" if="$(var pinky2)"/>
+  <node pkg="domain_bridge" exec="domain_bridge" name="pinky3_fleet_bridge" output="screen"
+        args="$(dirname)/pinky3_bridge.yaml" if="$(var pinky3)"/>
+</launch>

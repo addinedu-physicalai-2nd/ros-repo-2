@@ -1,0 +1,65 @@
+# 자동 생성: python3 make_bridge_config.py pinky2 2 --server-domain 0
+# 서버 도메인(0) <-> pinky2 도메인(2) 사이에서 fleet 토픽 5개만 전달한다.
+# 로봇 쪽은 namespace 없이 /fleet/..., 서버 쪽은 /pinky2/fleet/... 로 이름을 바꿔 전달한다.
+# Nav2, tf, 라이다 등 나머지 토픽은 pinky2 도메인 안에만 남는다.
+#
+# 실행: ros2 run domain_bridge domain_bridge pinky2_bridge.yaml
+# (실행하는 터미널에서 fleet_msgs가 source 되어 있어야 한다)
+
+name: pinky2_fleet_bridge
+from_domain: 2     # 기본 방향: 로봇 -> 서버
+to_domain: 0
+
+topics:
+  # ---- 로봇 -> 서버 ----
+  /fleet/state:
+    type: fleet_msgs/msg/RobotState
+    remap: /pinky2/fleet/state
+    qos:
+      reliability: best_effort
+      durability: volatile
+      history: keep_last
+      depth: 1
+
+  /fleet/event:
+    type: fleet_msgs/msg/RobotEvent
+    remap: /pinky2/fleet/event
+    qos:
+      reliability: reliable
+      durability: volatile
+      history: keep_last
+      depth: 10
+
+  # ---- 서버 -> 로봇 (토픽별로 도메인 방향을 뒤집음) ----
+  /pinky2/fleet/move:
+    type: fleet_msgs/msg/Move
+    from_domain: 0
+    to_domain: 2
+    remap: /fleet/move
+    qos:
+      reliability: reliable
+      durability: volatile
+      history: keep_last
+      depth: 10
+
+  /pinky2/fleet/control:
+    type: fleet_msgs/msg/Control
+    from_domain: 0
+    to_domain: 2
+    remap: /fleet/control
+    qos:
+      reliability: reliable
+      durability: volatile
+      history: keep_last
+      depth: 10
+
+  /pinky2/fleet/display:
+    type: fleet_msgs/msg/Display
+    from_domain: 0
+    to_domain: 2
+    remap: /fleet/display
+    qos:
+      reliability: reliable
+      durability: transient_local   # 로봇(또는 브리지)이 늦게 켜져도 마지막 화면을 받음
+      history: keep_last
+      depth: 1
