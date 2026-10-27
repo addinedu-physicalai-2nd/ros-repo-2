@@ -1,0 +1,27 @@
+# 로봇 쪽 정밀 정차 설정 (v7, 예시). fleet 에이전트가 읽는다. 서버는 이 파일을 모른다.
+# Waypoint.node_id로 찾아서, 그 노드에 도착한 뒤 아래 방법으로 정확히 선다.
+#
+# method
+#   dock  : 마커로 정렬한 뒤 back 만큼 후진해서 주차. 끝나면 CMD_DONE (marker_dock.py v4.3)
+#   align : 마커로 위치·방향만 맞추고 다음 Move를 이어 간다. 방향을 바꾸는 노드에서 쓴다
+#   tape  : 바닥 테이프 라인트레이싱으로 정렬. 끝나면 CMD_DONE (마지막 노드일 때)
+#
+# 마커 ID와 back 거리는 예시다. 마커를 붙이고 --record 한 뒤 실제 값으로 바꾼다.
+# 목록에 없는 노드는 Nav2 / odom 도착만으로 끝낸다.
+
+N14: {method: align, markers: [5, 6]}   # 5 = 오른쪽 바깥 벽 (멈춤 위치 = 통로 좌우 위치), 6 = 아래 벽 (후진 축)
+
+D1:  {method: dock, marker: 1, back: 0.0}   # 마커: 왼쪽 바깥 벽 (로봇 앞)
+D2:  {method: dock, marker: 2, back: 0.0}
+D3:  {method: dock, marker: 3, back: 0.10}  # 마커: 통로 건너 오른쪽 안쪽 벽 (로봇 앞)
+D4:  {method: dock, marker: 4, back: 0.10}
+
+P1:  {method: tape}                          # 바구니(뒤)를 주방 픽업대에 넣음
+
+# 테이블 정차: 테이프로 정밀하게 넣을 예정 (잠정. 방식이 정해지면 수정)
+T1:  {method: tape}
+T2:  {method: tape}
+T3:  {method: tape}
+T4:  {method: tape}
+T5:  {method: tape}
+T6:  {method: tape}
