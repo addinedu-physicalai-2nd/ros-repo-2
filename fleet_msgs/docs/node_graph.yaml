@@ -1,0 +1,71 @@
+# 노드 그래프 v4 (주방 + 도킹 3 + 테이블 4 + VIP 1, 서버가 관리)
+# 그림: node_map.png
+#
+# ID 규칙: 대문자 1글자 + 번호. 접두어 = 로봇이 거기서 하는 일
+#   T 테이블 서빙 / D 도킹(주차) / P 픽업 줄 / R 퇴식 줄 / N 지나가는 길 위의 점
+#   - 번호는 다시 매기지 않는다. 새 노드는 그 접두어의 다음 번호로 붙인다.
+#   - 코드는 ID 글자로 판단하지 않는다. 판단은 아래 필드(type, stop_kind, lock 등)로 한다.
+#
+# 좌표: 맵 그림(2280 x 1820 mm)의 비율로 계산한 설계값(m), 원점 = 보드 왼쪽 아래.
+#       SLAM 맵 완성 후 실측한 map 프레임 좌표로 반드시 교체한다.
+#
+# 필드
+#   type      : PASS(지나가는 점) / STOP(로봇이 서서 일하는 곳)
+#   stop_kind : STOP일 때만. QUEUE(줄서기) / PICKUP / RETURN(퇴식) / SERVE / DOCK
+#   table     : SERVE일 때만. 서빙하는 테이블
+#   lock      : 코너만 false, 나머지 전부 true
+#   no_wait   : true면 이 노드에서 기다리지 않는다 (다음 lock 노드까지 함께 잡을 수 있을 때만 준다)
+#   pocket    : true면 전진으로 들어가고 후진으로 나온다 (나올 때 입구 노드까지 Move.drive = REVERSE)
+#   yaw       : STOP 노드에서 서 있는 방향(rad). PASS 노드의 yaw는 서버가 진행 방향으로 계산한다.
+#               위(+y) 1.5708 / 오른쪽(+x) 0 / 아래(-y) -1.5708 / 왼쪽(-x) 3.1416
+#   next      : 갈 수 있는 다음 노드 (양방향 구간은 양쪽 다 적음)
+
+nodes:
+  # ---- 윗길 (오른쪽 -> 왼쪽) ----
+  - {id: N10, type: PASS, lock: true, x: 1.711, y: 1.617, next: [N11, T4]}        # 오른쪽 위 모서리, T4 앞
+  - {id: N11, type: PASS, lock: true, x: 1.117, y: 1.617, next: [N1, N12]}        # 윗길 가운데, 양방향 구간 Z1 위쪽 끝
+  - {id: N1,  type: PASS, lock: true, no_wait: true, x: 0.577, y: 1.617, next: [R1, N2]}  # 주방 분기
+  - {id: N2,  type: PASS, lock: false, x: 0.172, y: 1.617, next: [P1]}             # 왼쪽 위 모서리
+
+  # ---- 픽업 줄 (왼쪽 팔, 위 -> 아래) ----
+  - {id: P1, type: STOP, stop_kind: QUEUE,  lock: true, x: 0.172, y: 1.220, yaw: -1.5708, next: [P2]}  # 픽업 대기칸 1
+  - {id: P2, type: STOP, stop_kind: QUEUE,  lock: true, x: 0.172, y: 0.974, yaw: -1.5708, next: [P3]}  # 픽업 대기 (그림의 ③)
+  - {id: P3, type: STOP, stop_kind: PICKUP, lock: true, x: 0.172, y: 0.716, yaw: -1.5708, next: [N3]}  # 픽업 창구 (그림의 ④)
+  - {id: N3, type: PASS, lock: false, x: 0.172, y: 0.196, next: [N4]}                                 # 왼쪽 아래 모서리
+
+  # ---- 퇴식 줄 (오른쪽 팔, 위 -> 아래) ----
+  - {id: R1, type: STOP, stop_kind: QUEUE,  lock: true, x: 0.577, y: 1.220, yaw: -1.5708, next: [R2]}  # 퇴식 대기칸 1
+  - {id: R2, type: STOP, stop_kind: QUEUE,  lock: true, x: 0.577, y: 0.974, yaw: -1.5708, next: [R3]}  # 퇴식 대기 (그림의 ①)
+  - {id: R3, type: STOP, stop_kind: RETURN, lock: true, x: 0.577, y: 0.716, yaw: -1.5708, next: [N4]}  # 퇴식 창구 (그림의 ②)
+
+  # ---- 아랫길 (왼쪽 -> 오른쪽) ----
+  - {id: N4, type: PASS, lock: true, no_wait: true, x: 0.577, y: 0.196, next: [N5]}  # 주방 합류
+  - {id: N5, type: PASS, lock: true, x: 1.117, y: 0.196, next: [N6, N14]}            # 아랫길 가운데, 양방향 구간 Z1 아래쪽 끝
+  - {id: N6, type: PASS, lock: true, x: 1.711, y: 0.196, next: [N7, T2]}             # 오른쪽 아래 모서리, T2 앞
+
+  # ---- 오른쪽 세로길 (아래 -> 위) ----
+  - {id: N7, type: PASS, lock: true, x: 1.711, y: 0.553, next: [N8, T1]}             # T1 앞
+  - {id: N8, type: PASS, lock: true, x: 1.711, y: 0.913, next: [N9, T5, N13]}        # T5(VIP) 앞, 양방향 구간 Z2 오른쪽 끝
+  - {id: N9, type: PASS, lock: true, x: 1.711, y: 1.269, next: [N10, T3]}            # T3 앞
+
+  # ---- 가운데 세로길 (양방향 1차선) + 도킹 ----
+  - {id: N12, type: PASS, lock: true, x: 1.117, y: 1.167, next: [D1, N11, N13]}      # D1 앞
+  - {id: N13, type: PASS, lock: true, x: 1.117, y: 0.913, next: [D2, N12, N14, N8]}  # 정중앙, D2 앞
+  - {id: N14, type: PASS, lock: true, x: 1.117, y: 0.651, next: [D3, N13, N5]}       # D3 앞
+
+  - {id: D1, type: STOP, stop_kind: DOCK, pocket: true, lock: true, x: 0.864, y: 1.167, yaw: 3.1416, next: [N12]}
+  - {id: D2, type: STOP, stop_kind: DOCK, pocket: true, lock: true, x: 0.864, y: 0.913, yaw: 3.1416, next: [N13]}
+  - {id: D3, type: STOP, stop_kind: DOCK, pocket: true, lock: true, x: 0.864, y: 0.651, yaw: 3.1416, next: [N14]}
+
+  # ---- 테이블 서빙 정차 ----
+  - {id: T1, type: STOP, stop_kind: SERVE, table: T1, pocket: true, lock: true, x: 1.457, y: 0.553, yaw: 3.1416, next: [N7]}
+  - {id: T2, type: STOP, stop_kind: SERVE, table: T2, pocket: true, lock: true, x: 1.965, y: 0.196, yaw: 0.0,    next: [N6]}
+  - {id: T3, type: STOP, stop_kind: SERVE, table: T3, pocket: true, lock: true, x: 1.457, y: 1.269, yaw: 3.1416, next: [N9]}
+  - {id: T4, type: STOP, stop_kind: SERVE, table: T4, pocket: true, lock: true, x: 1.965, y: 1.617, yaw: 0.0,    next: [N10]}
+  - {id: T5, type: STOP, stop_kind: SERVE, table: T5, pocket: true, lock: true, x: 2.096, y: 0.913, yaw: 0.0,    next: [N8]}   # VIP 방
+
+# 양방향 1차선 구간. 이 구간에 들어갈 때는 구간을 빠져나가는 노드(또는 도착할 도킹)까지
+# 지나갈 노드 lock을 한 번에 전부 잡는다 (전부 아니면 하나도 안 잡음). README 4.3 참고.
+two_way_zones:
+  - {id: Z1, nodes: [N11, N12, N13, N14, N5]}   # 가운데 세로길 (도킹 줄)
+  - {id: Z2, nodes: [N13, N8]}                  # 정중앙 <-> VIP 앞 가로길
