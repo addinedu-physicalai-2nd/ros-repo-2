@@ -1,0 +1,50 @@
+/* 입구 키오스크 - 7인치 1024x600 터치 화면 기준. 손가락으로 누르기 쉽게 크게 */
+html, body { height: 100%; overflow: hidden; user-select: none; }
+body { display: flex; flex-direction: column; }
+
+.top { height: 56px; padding: 0 28px; display: flex; align-items: center; justify-content: space-between; font-size: 20px; flex: none; }
+h1 { font-size: 34px; font-weight: 800; letter-spacing: -.03em; line-height: 1.25; }
+.hint { font-size: 18px; color: var(--muted); }
+
+/* ---- 배치도 ---- */
+.pick { flex: 1; display: grid; grid-template-columns: 1fr 330px; gap: 20px; padding: 0 24px 24px; min-height: 0; }
+.floor-wrap { position: relative; display: grid; place-items: center; min-height: 0; }
+.floor {
+  position: relative; background: var(--surface); border: 2px solid var(--line); border-radius: 16px;
+}
+.tbl {
+  position: absolute; transform: translate(-50%, -50%);
+  border-radius: 14px; border: 3px solid var(--accent); background: var(--accent-weak);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  font-weight: 800; font-size: 26px; color: var(--accent-ink); transition: transform .08s, background .15s;
+}
+.tbl small { font-size: 13px; font-weight: 600; }
+.tbl:active:not(:disabled) { transform: translate(-50%, -50%) scale(.96); }
+.tbl.selected { background: var(--accent); color: #fff; box-shadow: 0 6px 18px rgba(229, 72, 127, .35); }
+.tbl:disabled { border-color: var(--line); background: #f0f0ee; color: var(--faint); opacity: 1; }
+.here {
+  position: absolute; transform: translate(-50%, -50%); font-size: 13px; font-weight: 700; color: #8a5a00;
+  background: #fbe9c8; border-radius: 999px; padding: 4px 10px; white-space: nowrap;
+}
+
+.panel { display: flex; flex-direction: column; justify-content: center; gap: 18px; }
+.legend { display: flex; gap: 18px; font-size: 16px; color: var(--muted); }
+.legend span { display: inline-flex; align-items: center; gap: 8px; }
+.sw { width: 22px; height: 16px; border-radius: 5px; display: inline-block; }
+.sw.free { border: 3px solid var(--accent); background: var(--accent-weak); }
+.sw.busy { border: 3px solid var(--line); background: #f0f0ee; }
+
+.btn.big { height: 80px; padding: 0 28px; font-size: 26px; border-radius: 18px; }
+.panel .btn.big { width: 100%; }
+
+/* ---- 안내 상태 ---- */
+.result { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px; padding: 0 40px 40px; }
+.result h1 { font-size: 42px; text-align: center; }
+.result .hint { font-size: 20px; text-align: center; min-height: 30px; }
+.result-badge {
+  min-width: 170px; height: 170px; padding: 0 28px; border-radius: 34px; background: var(--accent); color: #fff;
+  display: grid; place-items: center; font-size: 76px; font-weight: 800; letter-spacing: -.03em;
+}
+.result-badge.warn { background: var(--surface); color: var(--text); border: 2px solid var(--line); }
+.result-actions { display: flex; gap: 16px; }
+.result-actions .btn.big { min-width: 260px; }
