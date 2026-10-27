@@ -567,41 +567,46 @@ ros2 topic list | grep fleet          # /fleet/state, /fleet/move, /fleet/displa
 ros2 topic echo /fleet/display
 ```
 
-C++ 예시 (서버에서 Move와 Display 보내기). 노드 그래프를 읽어 경로를 Move로 바꾸는 부분은 [`fleet_graph`](../fleet_graph/README.md) 라이브러리가 해 준다. 전체 예시는 `fleet_graph/src/example_server.cpp`.
+C++ 예시 (서버에서 Move와 Display 보내기):
 
 ```cpp
 #include <rclcpp/rclcpp.hpp>
 #include "fleet_msgs/msg/move.hpp"
+#include "fleet_msgs/msg/waypoint.hpp"
 #include "fleet_msgs/msg/display.hpp"
-#include "fleet_graph/graph.hpp"
+
+using fleet_msgs::msg::Move;
+using fleet_msgs::msg::Waypoint;
+using fleet_msgs::msg::Display;
 
 // 서버 쪽 토픽은 /<robot_id>/fleet/... , QoS는 2.3 표 그대로
-auto move_pub = node->create_publisher<fleet_msgs::msg::Move>(
-  "/pinky1/fleet/move", rclcpp::QoS(10).reliable());
-auto display_pub = node->create_publisher<fleet_msgs::msg::Display>(
+auto move_pub = node->create_publisher<Move>("/pinky1/fleet/move", rclcpp::QoS(10).reliable());
+auto display_pub = node->create_publisher<Display>(
   "/pinky1/fleet/display", rclcpp::QoS(1).reliable().transient_local());
 
-auto g = fleet_graph::Graph::load(share_dir + "/docs/node_graph.yaml");
-auto path = g.shortest_path("N11", "D3");        // N11 N12 N13 N14 N15 N16 D3
+auto wp = [](const std::string & id, double x, double y, double yaw) {
+  Waypoint w; w.node_id = id; w.x = x; w.y = y; w.yaw = yaw; return w;
+};
 
-bool first = true;
-for (const auto & seg : g.to_segments(path)) {   // 방향이 바뀌거나 도킹에 드나드는 곳에서 끊김
-  fleet_msgs::msg::Move m;
-  m.cmd_id = 13;
-  m.mode = first ? fleet_msgs::msg::Move::REPLACE : fleet_msgs::msg::Move::APPEND;
-  m.drive = static_cast<uint8_t>(seg.drive);     // Move::FORWARD / Move::REVERSE
-  for (const auto & w : seg.waypoints) {
-    fleet_msgs::msg::Waypoint wp;
-    wp.node_id = w.node_id; wp.x = w.x; wp.y = w.y; wp.yaw = w.yaw;
-    m.waypoints.push_back(wp);
-  }
-  move_pub->publish(m);                          // 실제 서버는 lock 잡은 노드까지만 (4.1)
-  first = false;
-}
+// D3에서 전진으로 N16까지 나옴
+Move out;
+out.cmd_id = 13;
+out.mode = Move::REPLACE;
+out.drive = Move::FORWARD;
+out.waypoints = {wp("N16", 3.398, 1.700, 3.1416)};
+move_pub->publish(out);
 
-fleet_msgs::msg::Display d;
-d.text = "음식이 도착했습니다. 가져가 주세요";
-d.countdown_sec = 30;
+// N16에서 돌아 후진으로 P2, P1까지 (같은 cmd_id, APPEND)
+Move up;
+up.cmd_id = 13;
+up.mode = Move::APPEND;
+up.drive = Move::REVERSE;
+up.waypoints = {wp("P2", 3.398, 2.100, -1.5708), wp("P1", 3.398, 2.600, 3.1416)};
+move_pub->publish(up);
+
+Display d;
+d.text = "음식을 올려 주세요";
+d.countdown_sec = 0;
 display_pub->publish(d);
 ```
 
@@ -609,8 +614,7 @@ display_pub->publish(d);
 
 ```cmake
 find_package(fleet_msgs REQUIRED)
-find_package(fleet_graph REQUIRED)
-target_link_libraries(main_service fleet_graph::fleet_graph rclcpp::rclcpp ${fleet_msgs_TARGETS})
+target_link_libraries(main_service rclcpp::rclcpp ${fleet_msgs_TARGETS})
 ```
 
 ---
@@ -635,17 +639,16 @@ target_link_libraries(main_service fleet_graph::fleet_graph rclcpp::rclcpp ${fle
 
 ## 10. 변경 이력
 
-### v7 → v7.1 (C++ 전환, 메시지 변경 없음)
+### v7 → v7.1 (C++ 사용, 메시지 변경 없음)
 
 | 구분 | 내용 |
 |---|---|
-| 새 패키지 | `fleet_graph` (C++): 노드 그래프 읽기 · 검사 · 최단 경로 · 경로를 Move 구간으로 나누기. 메인 서비스가 링크해서 씀 |
-| 예시 코드 | 8장 Python 예시 → C++ 예시. 전체 예시 노드 `fleet_graph/src/example_server.cpp` |
-| 브리지 실행 | `fleet_bridge.launch.py` → `fleet_bridge.launch.xml` (Python launch 없음) |
-| 설치 | `docs/`(노드 그래프 · 맵 · precision_stops)를 `share/fleet_msgs/docs`에 설치. C++에서 `get_package_share_directory("fleet_msgs")`로 찾음 |
+| 예시 코드 | 8장 Python 예시 → C++ 예시 |
+| 브리지 실행 | `fleet_bridge.launch.py` → `fleet_bridge.launch.xml` |
+| 설치 | `docs/`(노드 그래프 · 맵 · precision_stops)를 `share/fleet_msgs/docs`에 설치 |
 
 `msg/` 파일은 그대로다. `.msg`는 언어와 상관없는 정의라서, 빌드하면 C++ 헤더(`fleet_msgs/msg/move.hpp` 등)가 자동으로 만들어진다.
-`bridge/make_bridge_config.py`는 브리지 설정 yaml을 한 번 만들어 주는 도구라 남겨 두었다 (실행 중인 시스템과 무관, pinky1~3 설정은 이미 만들어져 있음).
+`bridge/make_bridge_config.py`는 브리지 설정 yaml을 한 번 만들어 주는 도구라 남겨 두었다 (실행 중인 시스템과 무관).
 
 ### v5 → v7 (메시지 변경 없음, 맵 · 문서만)
 
