@@ -1,0 +1,27 @@
+<!--
+  로봇 한 대에서 fleet_agent + obstacle (+ docking)을 같이 띄운다 (Nav2 · 카메라 · LiDAR는 따로)
+    ros2 launch fleet_agent fleet_agent.launch.xml robot_id:=pinky1 start_node:=D1
+
+  정밀 정차(마커 도킹 · 라인)는 지금 끔. 켤 때:
+    ... use_docking:=true precision_stops:=$(ros2 pkg prefix fleet_msgs)/share/fleet_msgs/docs/precision_stops.yaml
+-->
+<launch>
+  <arg name="robot_id" default="pinky1"/>
+  <arg name="start_node" default=""/>   <!-- 켤 때 서 있는 도킹 (서버가 위치 확인에 씀) -->
+  <arg name="params" default="$(find-pkg-share fleet_agent)/config/fleet_agent.yaml"/>
+  <arg name="precision_stops" default=""/>   <!-- 비우면 정밀 정차 안 함 -->
+  <arg name="use_docking" default="false"/>
+
+  <node pkg="fleet_agent" exec="fleet_agent" name="fleet_agent" output="screen">
+    <param from="$(var params)"/>
+    <param name="robot_id" value="$(var robot_id)"/>
+    <param name="start_node" value="$(var start_node)"/>
+    <param name="precision_stops" value="$(var precision_stops)"/>
+  </node>
+  <node pkg="fleet_agent" exec="docking_node" name="docking" output="screen" if="$(var use_docking)">
+    <param from="$(var params)"/>
+  </node>
+  <node pkg="fleet_agent" exec="obstacle_node" name="obstacle" output="screen">
+    <param from="$(var params)"/>
+  </node>
+</launch>

@@ -1,0 +1,245 @@
+"""core.Driver를 ROS 없이 가짜 로봇으로 돌려 본다:  python3 -m pytest test/  (또는 python3 test/test_core.py)"""
+import math
+import os
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+
+from fleet_agent.core import (CMD_DONE, EV_BLOCKED, FORWARD, NODE_REACHED, REVERSE, BlockPolicy, Driver,  # noqa: E402
+                              ObstacleClass, ReverseControl, wrap)
+
+STOPS = {
+    'N14': {'method': 'align', 'markers': [5, 6]},
+    'D1': {'method': 'dock', 'marker': 1, 'back': 0.0},
+    'D2': {'method': 'dock', 'marker': 2, 'back': 0.0},
+    'D3': {'method': 'dock', 'marker': 3, 'back': 0.1},
+    'P1': {'method': 'tape'},
+}
+
+
+class FakeRobot:
+    """Nav2는 직선으로 목표까지 가서 yaw를 맞추고, cmd_vel은 적분. 정밀 정차는 다음 tick에 ok"""
+
+    def __init__(self, x, y, yaw):
+        self.x, self.y, self.yaw = x, y, yaw
+        self.v = self.w = 0.0
+        self.nav = None
+        self.events = []
+        self.prec = []
+        self.prec_pending = False
+        self.dirs = []
+        self.lcd = []
+        self.driver = None
+        self.prec_delay = 0      # 정밀 정차 결과를 이만큼 step 뒤에 (0 = 다음 step)
+        self.prec_ok = True
+        self.nav_fail = 0        # Nav2 목표를 이만큼 실패시킴
+        self.prec_cancelled = 0
+
+    # io
+    def nav_go(self, x, y, yaw):
+        if self.nav_fail > 0:
+            self.nav_fail -= 1
+            self.nav = None
+            self.driver.on_nav_result(False)
+            return
+        self.nav = (x, y, yaw)
+
+    def nav_cancel(self):
+        self.nav = None
+
+    def cmd_vel(self, v, w):
+        self.v, self.w = v, w
+
+    def event(self, t, cmd, node, reason):
+        self.events.append((t, node, reason))
+
+    def precision(self, req):
+        self.prec.append(req['node'] + ':' + req['method'])
+        self.prec_pending = True
+        self.prec_wait = self.prec_delay
+
+    def precision_cancel(self):
+        if self.prec_pending:
+            self.prec_cancelled += 1
+        self.prec_pending = False
+
+    def direction(self, d):
+        self.dirs.append(d)
+
+    def lcd_override(self, text):
+        self.lcd.append(text)
+
+    def log(self, text):
+        pass
+
+    def step(self, dt):
+        if self.nav:
+            tx, ty, tyaw = self.nav
+            d = math.hypot(tx - self.x, ty - self.y)
+            sp = 0.15 * dt
+            if d <= sp:
+                self.x, self.y, self.yaw = tx, ty, tyaw
+                self.nav = None
+                self.driver.on_nav_result(True)
+            else:
+                self.yaw = math.atan2(ty - self.y, tx - self.x)
+                self.x += (tx - self.x) / d * sp
+                self.y += (ty - self.y) / d * sp
+        else:
+            self.yaw = wrap(self.yaw + self.w * dt)
+            self.x += self.v * math.cos(self.yaw) * dt
+            self.y += self.v * math.sin(self.yaw) * dt
+        if self.prec_pending:
+            if self.prec_wait > 0:
+                self.prec_wait -= 1
+            else:
+                self.prec_pending = False
+                self.driver.on_precision_result(self.prec_ok, 'fake fail' if not self.prec_ok else 'fake')
+
+
+def run(robot, drv, secs, t0=0.0, dt=0.05, hook=None):
+    t = t0
+    while t < t0 + secs:
+        if hook:
+            hook(t)
+        drv.tick(t, (robot.x, robot.y, robot.yaw))
+        robot.step(dt)
+        t += dt
+    return t
+
+
+def make(x, y, yaw, last_drive=None):
+    r = FakeRobot(x, y, yaw)
+    d = Driver(r, STOPS, reverse=ReverseControl(speed=0.1), policy=BlockPolicy())
+    d.last_drive = last_drive
+    r.driver = d
+    return r, d
+
+
+def reached(r):
+    return [n for t, n, _ in r.events if t == NODE_REACHED]
+
+
+def test_d3_exit_reverse_to_pickup():
+    # D3에서 나와 후진으로 P1까지 (서버 로그: FORWARD [N16] -> REVERSE [P2] -> REVERSE [P1])
+    r, d = make(3.548, 1.700, math.pi, last_drive=REVERSE)
+    d.on_move(10, False, FORWARD, [('N16', 3.398, 1.700, -1.5708)])
+    d.on_move(10, True, REVERSE, [('P2', 3.398, 2.100, -1.5708)])
+    d.on_move(10, True, REVERSE, [('P1', 3.398, 2.600, 3.1416)])
+    run(r, d, 40)
+    assert reached(r) == ['N16', 'P2', 'P1']
+    assert [n for t, n, _ in r.events if t == CMD_DONE] == ['P1']
+    assert r.prec == ['P1:tape']
+    assert abs(r.x - 3.398) < 0.04 and abs(r.y - 2.600) < 0.04
+    assert abs(wrap(r.yaw - math.pi)) < 0.2          # P1에서 왼쪽을 보게 돌았다
+    assert 'REVERSE' in r.dirs
+
+
+def test_d2_pass_d1_forward_then_reverse():
+    # D2로: D1까지 전진 -> 돌아서 D2로 후진 진입 -> dock
+    r, d = make(1.698, 2.600, -math.pi / 2, last_drive=FORWARD)
+    d.on_move(20, False, FORWARD, [('D1', 1.748, 1.525, -1.5708)])
+    d.on_move(20, True, REVERSE, [('D2', 1.748, 1.375, 3.1416)])
+    run(r, d, 40)
+    assert reached(r) == ['D1', 'D2']
+    assert r.prec == ['D2:dock']                     # D1은 지나가기만 (dock 안 함)
+    assert [n for t, n, _ in r.events if t == CMD_DONE] == ['D2']
+
+
+def test_late_append_waits_in_grace():
+    # 줄이 빈 뒤 0.3초 만에 APPEND가 오면 끝 처리(CMD_DONE) 없이 이어 간다
+    r, d = make(2.123, 2.600, 0.0, last_drive=FORWARD)
+    d.on_move(30, False, FORWARD, [('T1', 2.348, 2.600, 0.0)])
+    t = run(r, d, 1.6)
+    assert reached(r) == ['T1']
+    run(r, d, 0.3, t0=t)
+    d.on_move(30, True, FORWARD, [('N3', 2.573, 2.600, 0.0)])
+    run(r, d, 5, t0=t + 0.3)
+    assert reached(r) == ['T1', 'N3']
+    assert [n for t, n, _ in r.events if t == CMD_DONE] == ['N3']
+
+
+def test_align_at_n14_then_continue():
+    r, d = make(3.023, 1.200, 0.0, last_drive=FORWARD)
+    d.on_move(40, False, FORWARD, [('N14', 3.398, 1.200, -1.5708)])
+    d.on_move(40, True, REVERSE, [('N15', 3.398, 1.550, -1.5708)])
+    run(r, d, 20)
+    assert r.prec == ['N14:align']
+    assert reached(r) == ['N14', 'N15']
+
+
+def test_static_obstacle_blocks_then_resumes():
+    r, d = make(3.398, 1.200, -math.pi / 2, last_drive=REVERSE)
+    d.on_move(50, False, REVERSE, [('N15', 3.398, 1.550, -1.5708), ('N16', 3.398, 1.700, -1.5708)])
+
+    def hook(t):
+        d.set_obstacle('STATIC' if 1.0 <= t < 5.0 else '')
+    run(r, d, 15, hook=hook)
+    blocked = [e for e in r.events if e[0] == EV_BLOCKED]
+    assert len(blocked) == 1 and blocked[0][2].startswith('STATIC')
+    assert reached(r) == ['N15', 'N16']
+
+
+def test_append_cancels_precision_at_pass_through_dock():
+    # D2로 가는데 D2 lock이 늦어 D1에서 줄이 빔 -> D1을 끝으로 보고 dock 시작 -> APPEND(D2)가 오면 취소하고 이어 감
+    r, d = make(1.698, 2.600, -math.pi / 2, last_drive=FORWARD)
+    r.prec_delay = 10 ** 6  # 도킹이 끝나지 않는 중
+    d.on_move(60, False, FORWARD, [('D1', 1.748, 1.525, -1.5708)])
+    t = run(r, d, 12)
+    assert r.prec == ['D1:dock'] and d.phase == 'precision'
+    r.prec_delay = 0
+    d.on_move(60, True, REVERSE, [('D2', 1.748, 1.375, 3.1416)])
+    run(r, d, 15, t0=t)
+    assert r.prec_cancelled == 1
+    assert reached(r) == ['D1', 'D2']
+    assert [n for tt, n, _ in r.events if tt == CMD_DONE] == ['D2']
+
+
+def test_precision_fail_reason_in_cmd_done():
+    r, d = make(3.548, 1.700, math.pi, last_drive=REVERSE)
+    r.prec_ok = False
+    d.on_move(70, False, FORWARD, [('N16', 3.398, 1.700, -1.5708)])
+    d.on_move(70, True, REVERSE, [('D3', 3.548, 1.700, 3.1416)])
+    run(r, d, 20)
+    done = [(n, why) for tt, n, why in r.events if tt == CMD_DONE]
+    assert done == [('D3', 'D3:fake fail')]
+
+
+def test_nav_retry_then_ok():
+    r, d = make(2.123, 2.600, 0.0, last_drive=FORWARD)
+    r.nav_fail = 1  # 첫 목표만 실패
+    d.on_move(80, False, FORWARD, [('T1', 2.348, 2.600, -1.5708)])
+    run(r, d, 5)
+    assert reached(r) == ['T1'] and not d.error
+
+
+def test_obstacle_class():
+    c = ObstacleClass()
+    assert c.update(0.0, 0.15) == 'UNKNOWN'
+    for i in range(1, 30):  # 0.1초마다, 거리 그대로
+        k = c.update(i * 0.1, 0.15)
+    assert k == 'STATIC'
+    c.reset()
+    k = ''
+    for i in range(30):  # 사람: 거리가 흔들림
+        k = c.update(i * 0.1, 0.15 + 0.05 * math.sin(i))
+    assert k == 'DYNAMIC'
+    assert c.update(5.0, None) == ''
+
+
+def test_block_policy_dynamic():
+    p = BlockPolicy(dynamic_wait=3, dynamic_ask=5)
+    asks, reports = [], []
+    for i in range(100):
+        a, rep = p.update(i * 0.1, 'DYNAMIC')
+        asks.append(a)
+        if rep:
+            reports.append(i * 0.1)
+    assert not asks[0] and asks[40] and len(reports) == 1 and abs(reports[0] - 8.0) < 0.15
+
+
+if __name__ == '__main__':
+    for name, fn in list(globals().items()):
+        if name.startswith('test_'):
+            fn()
+            print('ok', name)
