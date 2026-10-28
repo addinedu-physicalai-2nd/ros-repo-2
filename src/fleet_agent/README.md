@@ -67,6 +67,18 @@ ros2 run fleet_agent marker_dock --dry-run --id 3     # 계획만 보기
 - 목표 파일은 마커 ID별이라, D3 자리에서 `--id 3`, N14에서 `--id 5`(동쪽 보고) · `--id 6`(남쪽 보고)처럼 저장한다
 - 도킹 로그 · 사진은 `~/dock_logs/`에 도킹마다 남는다
 
+## 한 번에 켜기 (robot_system.launch.xml)
+
+bringup -> (2초) Nav2(맵 pinkytorang_map_v4, 설정 config4) -> 초기 위치 + fleet_agent 를 한 명령으로 켠다.
+```bash
+export ROS_DOMAIN_ID=52
+ros2 launch fleet_agent robot_system.launch.xml robot_id:=pinky2 start_node:=D2
+```
+- 초기 위치: `initial_pose`가 node_graph.yaml의 start_node 좌표 · yaw로 /initialpose를 보낸다 (RViz 2D Pose Estimate 대신).
+  D 좌표가 안 맞으면 `set_initial_pose:=false`로 끄고 RViz로 맞춘다
+- 맵 · Nav2 설정 바꾸기: `map:=... params_file:=...` (기본 ~/maps/pinkytorang_map_v4.yaml, ~/params/config4.yaml)
+- Nav2에서 tf 에러가 계속 나면 `nav_delay:=5`
+
 ## 실제 로봇 시험 (정밀 정차 끔)
 
 지금은 도킹(마커 · 라인)을 빼고 **주문 → P1에서 5초 대기 → 테이블 → 도킹 자리로 복귀**만 한다.

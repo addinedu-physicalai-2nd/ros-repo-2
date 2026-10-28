@@ -26,6 +26,7 @@ setup(
             'fleet_agent = fleet_agent.agent_node:main',
             'docking_node = fleet_agent.docking_node:main',
             'obstacle_node = fleet_agent.obstacle_node:main',
+            'initial_pose = fleet_agent.initial_pose:main',     # 시작 도킹 좌표로 AMCL 초기 위치
             'marker_dock = fleet_agent.docking.marker_dock:main',   # 혼자 실행: --calibrate / --record / --dry-run
         ],
     },

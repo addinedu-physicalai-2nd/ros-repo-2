@@ -1,0 +1,50 @@
+<!--
+  로봇 한 대 전체 시작: bringup -> Nav2(맵) -> 초기 위치 -> fleet_agent
+    ros2 launch fleet_agent robot_system.launch.xml robot_id:=pinky2 start_node:=D2
+
+  ROS_DOMAIN_ID는 미리 export (pinky1=51, pinky2=52, pinky3=53)
+
+  아래 두 명령을 차례로 켜는 것과 같다
+    ros2 launch pinky_bringup bringup_robot.launch.xml
+    ros2 launch pinky_navigation bringup_launch.xml map:=$HOME/maps/pinkytorang_map_v4.yaml params_file:=$HOME/params/config4.yaml
+  맵 · Nav2 설정을 바꿀 때: map:=... params_file:=...
+-->
+<launch>
+  <arg name="robot_id" default="pinky1"/>
+  <arg name="start_node" default="D1"/>   <!-- 로봇을 올려 둔 도킹. 초기 위치 · 서버 위치 확인에 씀 -->
+  <arg name="map" default="$(env HOME)/maps/pinkytorang_map_v4.yaml"/>
+  <arg name="params_file" default="$(env HOME)/params/config4.yaml"/>   <!-- Nav2 설정 -->
+
+  <arg name="bringup_pkg" default="pinky_bringup"/>
+  <arg name="bringup_file" default="bringup_robot.launch.xml"/>
+  <arg name="nav_pkg" default="pinky_navigation"/>
+  <arg name="nav_file" default="bringup_launch.xml"/>
+
+  <arg name="nav_delay" default="2.0"/>      <!-- bringup 뒤 Nav2까지 (초). Nav2에서 tf 에러가 계속 나면 늘림 -->
+  <arg name="agent_delay" default="0.0"/>    <!-- fleet_agent까지 (초). initial_pose가 AMCL을 알아서 기다려서 0이면 됨 -->
+  <arg name="set_initial_pose" default="true"/>   <!-- false = RViz 2D Pose Estimate로 직접 -->
+  <arg name="node_graph" default="$(find-pkg-share fleet_msgs)/docs/node_graph.yaml"/>
+
+  <!-- 1. bringup -->
+  <include file="$(find-pkg-share $(var bringup_pkg))/launch/$(var bringup_file)"/>
+
+  <!-- 2. Nav2 -->
+  <timer period="$(var nav_delay)">
+    <include file="$(find-pkg-share $(var nav_pkg))/launch/$(var nav_file)">
+      <arg name="map" value="$(var map)"/>
+      <arg name="params_file" value="$(var params_file)"/>
+    </include>
+  </timer>
+
+  <!-- 3. 초기 위치 (AMCL이 뜰 때까지 기다렸다 start_node 좌표로) + fleet_agent -->
+  <timer period="$(var agent_delay)">
+    <node pkg="fleet_agent" exec="initial_pose" name="initial_pose" output="screen" if="$(var set_initial_pose)">
+      <param name="start_node" value="$(var start_node)"/>
+      <param name="node_graph" value="$(var node_graph)"/>
+    </node>
+    <include file="$(find-pkg-share fleet_agent)/launch/fleet_agent.launch.xml">
+      <arg name="robot_id" value="$(var robot_id)"/>
+      <arg name="start_node" value="$(var start_node)"/>
+    </include>
+  </timer>
+</launch>
