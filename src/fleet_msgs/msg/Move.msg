@@ -12,7 +12,15 @@ uint8 APPEND=1      # 기존 경로 뒤에 이어 붙임. 원래 명령과 같�
 uint8 FORWARD=0     # 전진 (앞이 진행 방향)
 uint8 REVERSE=1     # 후진 (뒤가 진행 방향)
 
+# guide (v8): 안내 손님과 같이 가는 Move인지. 서빙 · 도킹 · 복귀는 늘 OFF
+#   안내 중 로봇이 알아서: 출발 전 손님 기다림(인사), 꺾이는 노드에서 뒤돌아 확인, 목적지 도착 효과
+#   손님을 놓치면 그 자리에 멈추고 RobotEvent CMD_FAILED, reason = "guest_lost:<노드>:<이유>"
+uint8 GUIDE_OFF=0   # 일반 주행
+uint8 GUIDE_ON=1    # 안내 중
+uint8 GUIDE_END=2   # 안내 중 + 이 Move의 마지막 노드가 안내 목적지 (도착 효과)
+
 uint32 cmd_id       # 명령 번호 (서버가 1씩 증가)
 uint8 mode          # REPLACE / APPEND
 uint8 drive         # FORWARD / REVERSE
+uint8 guide         # GUIDE_OFF / GUIDE_ON / GUIDE_END
 Waypoint[] waypoints  # 차례로 지나갈 노드
