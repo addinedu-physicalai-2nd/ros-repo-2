@@ -53,6 +53,10 @@ class TrafficManager {
 
   // ---- 목적지
   bool setGoal(const std::string& id, const std::string& node);  // 경로가 없으면 false
+  // guide = 안내 손님과 같이 가는 길 (보내는 Move에 GUIDE_ON / 목적지 Move에 GUIDE_END)
+  bool setGoal(const std::string& id, const std::string& node, bool guide);
+  // 로봇이 그 자리에 멈췄다 (안내 손님 놓침): 보낸 남은 칸을 버리고 lock을 푼다. 지금 노드 lock만 남김
+  void abandon(const std::string& id);
   void clearGoal(const std::string& id);
   bool isStationary(const std::string& id) const;  // 보낸 노드도 없고 목적지도 없음
   std::string goalOf(const std::string& id) const;  // 목적지 ("" = 없음)
@@ -97,6 +101,7 @@ class TrafficManager {
     std::set<std::string> avoid;   // 우회 중: 경로 계산에서 뺄 노드
     Clock::time_point avoid_until;
     std::string via;               // 비켜 주기: 먼저 들를 옆 칸 ("" = 없음)
+    bool guide = false;            // 안내 중인 목적지 (목적지가 바뀌면 지움)
   };
 
   std::string lastSent(const Robot& r) const;

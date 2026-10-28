@@ -5,7 +5,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from fleet_agent.core import (CMD_DONE, EV_BLOCKED, FORWARD, NODE_REACHED, REVERSE, BlockPolicy, Driver,  # noqa: E402
+from fleet_agent.core import (GUIDE_END, GUIDE_OFF, GUIDE_ON, CMD_DONE, CMD_FAILED, EV_BLOCKED, FORWARD, NODE_REACHED, REVERSE, BlockPolicy, Driver,  # noqa: E402
                               ObstacleClass, ReverseControl, wrap)
 
 STOPS = {
@@ -34,6 +34,8 @@ class FakeRobot:
         self.prec_ok = True
         self.nav_fail = 0        # Nav2 목표를 이만큼 실패시킴
         self.prec_cancelled = 0
+        self.guides = []         # 안내 요청 (action, node, 그때 yaw)
+        self.guide_cancels = 0
 
     # io
     def nav_go(self, x, y, yaw):
@@ -62,6 +64,12 @@ class FakeRobot:
         if self.prec_pending:
             self.prec_cancelled += 1
         self.prec_pending = False
+
+    def guide(self, req):
+        self.guides.append((req['action'], req['node'], self.yaw))
+
+    def guide_cancel(self):
+        self.guide_cancels += 1
 
     def direction(self, d):
         self.dirs.append(d)
@@ -236,6 +244,96 @@ def test_block_policy_dynamic():
         if rep:
             reports.append(i * 0.1)
     assert not asks[0] and asks[40] and len(reports) == 1 and abs(reports[0] - 8.0) < 0.15
+
+
+
+
+# ---------------------------------------------------------------- 안내 (Move.guide)
+def auto_ok(r, d, ok=True):
+    """Guide 노드 흉내: greet / watch 요청이 오면 바로 결과"""
+    def hook(t):
+        if d.guide_state == 'running' and r.guides and r.guides[-1][0] in ('greet', 'watch'):
+            d.on_guide_result(ok, 'guest_seen' if ok else 'not_seen')
+    return hook
+
+
+def test_guide_greet_first_then_arrive_effect():
+    r, d = make(0.0, 0.0, 0.0, last_drive=FORWARD)
+    d.last_node = 'D1'
+    d.on_move(60, False, FORWARD, [('N1', 1.0, 0.0, 0.0)], GUIDE_ON)
+    t = run(r, d, 2)
+    assert r.guides == [('greet', 'D1', 0.0)]       # 떠나기 전에 손님 기다림
+    assert abs(r.x) < 1e-6 and reached(r) == []
+    d.on_guide_result(True, 'guest_seen')
+    d.on_move(60, True, FORWARD, [('T1', 2.0, 0.0, 0.0)], GUIDE_END)
+    run(r, d, 20, t0=t)
+    assert reached(r) == ['N1', 'T1']                # 곧은 길: 확인 없이 지나감
+    assert [g[0] for g in r.guides] == ['greet', 'arrive']
+    assert [n for t_, n, _ in r.events if t_ == CMD_DONE] == ['T1']
+
+
+def test_guide_checks_at_corner_only():
+    r, d = make(0.0, 0.0, 0.0, last_drive=FORWARD)
+    d.on_move(61, False, FORWARD, [('N1', 1.0, 0.0, 0.0), ('N2', 2.0, 0.0, 0.0), ('N3', 2.0, 1.0, 1.5708)],
+              GUIDE_END)
+    yaw_at_watch = []
+    ok = auto_ok(r, d)
+
+    def hook(t):
+        if d.phase == 'guide_watch' and not yaw_at_watch:
+            yaw_at_watch.append((r.x, r.yaw))
+        ok(t)
+    run(r, d, 40, hook=hook)
+    assert [g[:2] for g in r.guides] == [('greet', 'N1'), ('watch', 'N2'), ('arrive', 'N3')]  # N1 곧음, N2 꺾임
+    x, yaw = yaw_at_watch[0]
+    assert abs(x - 2.0) < 0.01 and abs(wrap(yaw - math.pi)) < 0.2   # N2에 서서 뒤(왔던 쪽)를 봄
+    assert reached(r) == ['N1', 'N2', 'N3']
+
+
+def test_guide_guest_lost_stops_and_reports():
+    r, d = make(0.0, 0.0, 0.0, last_drive=FORWARD)
+    d.on_move(62, False, FORWARD, [('N1', 1.0, 0.0, 0.0), ('N2', 1.0, 1.0, 1.5708)], GUIDE_ON)
+    ok = auto_ok(r, d)
+
+    def hook(t):
+        if r.guides and r.guides[-1][0] == 'watch' and d.guide_state == 'running':
+            d.on_guide_result(False, 'not_seen')
+        else:
+            ok(t)
+    run(r, d, 30, hook=hook)
+    fails = [(n, why) for t_, n, why in r.events if t_ == CMD_FAILED]
+    assert fails == [('N1', 'guest_lost:N1:not_seen')]
+    assert reached(r) == ['N1']
+    assert d.phase == 'idle' and not d.error and len(d.queue) == 0 and not d.in_guide
+
+
+def test_guide_resend_does_not_greet_again_and_serve_never_greets():
+    r, d = make(0.0, 0.0, 0.0, last_drive=FORWARD)
+    d.on_move(63, False, FORWARD, [('N1', 1.0, 0.0, 0.0)], GUIDE_ON)
+    run(r, d, 15, hook=auto_ok(r, d))
+    d.on_move(64, False, FORWARD, [('N2', 2.0, 0.0, 0.0)], GUIDE_ON)      # 통신 끊김 뒤 다시 보냄 (새 REPLACE)
+    run(r, d, 15, t0=15, hook=auto_ok(r, d))
+    assert [g[0] for g in r.guides] == ['greet']
+    d.on_move(65, False, FORWARD, [('N3', 3.0, 0.0, 0.0)], GUIDE_OFF)     # 안내 끝 -> 복귀
+    run(r, d, 15, t0=30)
+    assert [g[0] for g in r.guides] == ['greet'] and not d.in_guide
+    assert reached(r) == ['N1', 'N2', 'N3']
+
+
+def test_guide_replace_during_watch_cancels():
+    r, d = make(0.0, 0.0, 0.0, last_drive=FORWARD)
+    d.on_move(66, False, FORWARD, [('N1', 1.0, 0.0, 0.0), ('N2', 1.0, 1.0, 1.5708)], GUIDE_ON)
+    ok = auto_ok(r, d)
+
+    def hook(t):
+        if not (r.guides and r.guides[-1][0] == 'watch'):
+            ok(t)
+    t = run(r, d, 20, hook=hook)
+    assert d.phase == 'guide_watch'
+    d.on_move(67, False, FORWARD, [('N0', 0.0, 0.0, 3.14)], GUIDE_OFF)
+    assert r.guide_cancels == 1
+    run(r, d, 15, t0=t)
+    assert reached(r)[-1] == 'N0'
 
 
 if __name__ == '__main__':

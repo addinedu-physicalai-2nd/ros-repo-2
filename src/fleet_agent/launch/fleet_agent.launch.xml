@@ -4,6 +4,9 @@
 
   정밀 정차(마커 도킹 · 라인)는 지금 끔. 켤 때:
     ... use_docking:=true precision_stops:=$(ros2 pkg prefix fleet_msgs)/share/fleet_msgs/docs/precision_stops.yaml
+
+  안내 손님 확인(카메라 YOLO): use_guide:=true guide_model:=<모델.pt>
+    guide 노드가 없으면 fleet_agent는 손님 확인을 건너뛰고 바로 진행한다. 모델이 없으면 guide 노드가 바로 OK
 -->
 <launch>
   <arg name="robot_id" default="pinky1"/>
@@ -11,6 +14,8 @@
   <arg name="params" default="$(find-pkg-share fleet_agent)/config/fleet_agent.yaml"/>
   <arg name="precision_stops" default=""/>   <!-- 비우면 정밀 정차 안 함 -->
   <arg name="use_docking" default="false"/>
+  <arg name="use_guide" default="false"/>
+  <arg name="guide_model" default=""/>   <!-- YOLO 모델 (.pt). 비우면 손님 확인 없이 OK -->
 
   <node pkg="fleet_agent" exec="fleet_agent" name="fleet_agent" output="screen">
     <param from="$(var params)"/>
@@ -20,6 +25,10 @@
   </node>
   <node pkg="fleet_agent" exec="docking_node" name="docking" output="screen" if="$(var use_docking)">
     <param from="$(var params)"/>
+  </node>
+  <node pkg="fleet_agent" exec="guide_node" name="guide" output="screen" if="$(var use_guide)">
+    <param from="$(var params)"/>
+    <param name="model_path" value="$(var guide_model)"/>
   </node>
   <node pkg="fleet_agent" exec="obstacle_node" name="obstacle" output="screen">
     <param from="$(var params)"/>

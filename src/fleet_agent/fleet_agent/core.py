@@ -5,6 +5,7 @@
 - BlockPolicy    : 장애물로 멈췄을 때 언제 서버에 BLOCKED를 보낼지 (사람 / 물건)
 - ObstacleClass  : LiDAR 거리 변화로 사람(DYNAMIC) / 물건(STATIC) 구분
 - Driver         : 노드 단위 주행 상태기계 (fleet_msgs README 5장 로봇 규칙)
+                   + 안내 (Move.guide: 출발 전 인사 · 꺾이는 노드에서 뒤돌아 확인 · 도착 효과, 손님 확인은 Guide 노드)
 """
 import math
 from dataclasses import dataclass
@@ -20,6 +21,8 @@ IDLE, MOVING, PAUSED, BLOCKED, ERROR = 0, 1, 2, 3, 4
 NODE_REACHED, CMD_DONE, CMD_FAILED, EV_BLOCKED = 0, 1, 2, 4
 # Control.command
 PAUSE, RESUME, CANCEL = 0, 1, 2
+# Move.guide (fleet_msgs v8)
+GUIDE_OFF, GUIDE_ON, GUIDE_END = 0, 1, 2
 
 
 def wrap(a):
@@ -52,6 +55,7 @@ class Step:
     x: float
     y: float
     yaw: float
+    guide: int = GUIDE_OFF
 
 
 class StepQueue:
@@ -61,7 +65,7 @@ class StepQueue:
         self.steps = []
         self.cmd_id = 0
 
-    def apply(self, cmd_id, append, drive, waypoints):
+    def apply(self, cmd_id, append, drive, waypoints, guide=GUIDE_OFF):
         if append:
             if cmd_id != self.cmd_id:
                 return False  # 다른 명령에 붙이려는 APPEND는 버린다
@@ -69,7 +73,7 @@ class StepQueue:
             self.steps.clear()
             self.cmd_id = cmd_id
         for w in waypoints:
-            self.steps.append(Step(cmd_id, drive, w[0], w[1], w[2], w[3]))
+            self.steps.append(Step(cmd_id, drive, w[0], w[1], w[2], w[3], guide))
         return True
 
     def clear(self):
@@ -218,6 +222,8 @@ class Driver:
       precision_cancel()
       direction(text)          Obstacle 노드에 지금 볼 방향 (FORWARD / REVERSE / STOP)
       lcd_override(text)       장애물 안내 문구 (None = 서버 문구로 돌아감)
+      guide(req)               Guide 노드에 요청 {action: greet / watch / arrive} (결과는 on_guide_result)
+      guide_cancel()
       log(text)
 
     규칙 (fleet_msgs README 5장)
@@ -226,10 +232,16 @@ class Driver:
       - FORWARD = Nav2, REVERSE = cmd_vel 직선 후진
       - 중간 노드는 위치만 통과, 줄 끝 노드에서만 yaw를 맞춘다
       - 줄 끝 노드가 dock / tape 정밀 정차면 끝낸 뒤 CMD_DONE. align 노드는 지날 때마다 맞추고 이어 간다
+    안내 (Move.guide != OFF): 서버는 "안내 중"만 알려 주고, 나머지는 로봇이 판단한다
+      - 인사 : 안내가 아닌 상태에서 안내 Move를 처음 받으면, 떠나기 전에 Guide 'greet' (앞 카메라로 손님 기다림)
+      - 확인 : 꺾이는 노드(들어온 방향과 나갈 방향이 check_turn 넘게 다름)에서 멈춤 -> 뒤로 돎 -> Guide 'watch'
+               -> 다음 노드 쪽으로 돎 -> 이어 감. 바로 전 인사 · 확인 자리에서 check_gap m 안이면 건너뜀
+      - 도착 : GUIDE_END Move의 끝에서 CMD_DONE 뒤 Guide 'arrive' (도착 효과, 기다리지 않음)
+      - 손님을 못 찾으면 그 자리에 멈추고 CMD_FAILED reason="guest_lost:<노드>:<이유>" (고장 아님, 줄 비움)
     """
 
     def __init__(self, io, stops, pass_tol=0.08, yaw_tol=0.15, done_grace=0.5, reverse=None, policy=None,
-                 nav_retries=1):
+                 nav_retries=1, check_turn_deg=45.0, check_gap=0.8):
         self.io = io
         self.stops = stops
         self.pass_tol = pass_tol      # 중간 노드 통과 판정 거리 (다음 노드로 바로 넘어감)
@@ -240,6 +252,7 @@ class Driver:
         self.queue = StepQueue()
         self.cur = None
         self.phase = 'idle'           # idle / turn / nav / reverse / align / grace / final_turn / precision
+        #                               guide_greet / guide_turn / guide_watch (안내)
         self.after_turn = ''          # turn 끝나고: move / finish
         self.turn_target = 0.0
         self.seg_start = None
@@ -256,19 +269,29 @@ class Driver:
         self.nav_retries = nav_retries  # Nav2 실패 때 다시 보내는 횟수 (그래도 안 되면 CMD_FAILED)
         self.nav_tries = 0
         self.prec_detail = ''         # 정밀 정차 실패 이유 -> CMD_DONE.reason
+        self.guide_state = ''         # '' / running / ok / fail
+        self.guide_detail = ''
+        self.guide_after = None       # guide 단계가 끝나면 할 일 (함수)
+        self.in_guide = False         # 안내 중 (인사를 이미 함)
+        self.check_turn = math.radians(check_turn_deg)
+        self.check_gap = check_gap
+        self.check_xy = None          # 마지막으로 인사 · 확인한 자리
+        self.prev_xy = None           # 바로 전에 도착한 노드 (꺾임 판단)
 
     # ------------------------------------------------------------ 입력
-    def on_move(self, cmd_id, append, drive, waypoints):
+    def on_move(self, cmd_id, append, drive, waypoints, guide=GUIDE_OFF):
         if not waypoints:
             return
+        if guide == GUIDE_OFF:
+            self.in_guide = False     # 안내가 끝났다 (복귀 · 서빙)
         if not append:  # REPLACE: 지금 가던 것까지 버리고 새로
             self._stop_motion()
-            self.queue.apply(cmd_id, False, drive, waypoints)
+            self.queue.apply(cmd_id, False, drive, waypoints, guide)
             self.cur = None
             self.phase = 'idle'
             self.error = False
             return
-        if not self.queue.apply(cmd_id, True, drive, waypoints):
+        if not self.queue.apply(cmd_id, True, drive, waypoints, guide):
             self.io.log(f'다른 명령({cmd_id})에 붙이는 APPEND 무시 (지금 {self.queue.cmd_id})')
             return
         if self.phase == 'precision':
@@ -289,6 +312,7 @@ class Driver:
             self._resume()
         elif cmd == CANCEL:
             self._stop_motion()
+            self.in_guide = False
             self.queue.clear()
             self.cur = None
             self.phase = 'idle'
@@ -304,6 +328,11 @@ class Driver:
             if not ok:
                 self.io.log(f'정밀 정차 실패, Nav2 위치로 진행: {detail}')
                 self.prec_detail = f'{self.cur.node_id if self.cur else ""}:{detail}'
+
+    def on_guide_result(self, ok, detail=''):
+        if self.phase in ('guide_greet', 'guide_watch') and self.guide_state == 'running':
+            self.guide_state = 'ok' if ok else 'fail'
+            self.guide_detail = detail
 
     def set_obstacle(self, kind):
         self.obstacle = kind or ''
@@ -348,15 +377,23 @@ class Driver:
         if self.phase == 'idle':
             if len(self.queue):
                 self._start_next(pose)
-        elif self.phase == 'turn' or self.phase == 'final_turn':
+        elif self.phase in ('turn', 'final_turn', 'guide_turn'):
             w, done = turn_command(pose[2], self.turn_target, tol=self.yaw_tol)
             self.io.cmd_vel(0.0, w)
             if done:
                 self.io.cmd_vel(0.0, 0.0)
                 if self.phase == 'turn':
                     self._begin_move(pose)
+                elif self.phase == 'guide_turn':
+                    self.guide_after(pose)
                 else:
                     self._precision_or_done()
+        elif self.phase in ('guide_greet', 'guide_watch'):
+            if self.guide_state == 'ok':
+                self.guide_state = ''
+                self.guide_after(pose)
+            elif self.guide_state == 'fail':
+                self._guest_lost()
         elif self.phase == 'nav':
             self._tick_nav(pose)
         elif self.phase == 'reverse':
@@ -385,8 +422,8 @@ class Driver:
     def _tick_nav(self, pose):
         d = math.hypot(self.cur.x - pose[0], self.cur.y - pose[1])
         nxt = self.queue.steps[0] if len(self.queue) else None
-        if nxt and nxt.drive == FORWARD and d < self.pass_tol:
-            self._reached(pose)  # 중간 노드: 위치만 통과, 다음 목표로 바로
+        if nxt and nxt.drive == FORWARD and d < self.pass_tol and not self._is_check(self.cur, nxt):
+            self._reached(pose)  # 중간 노드: 위치만 통과, 다음 목표로 바로 (손님 확인 노드는 끝까지 가서 선다)
             return
         if self.nav_state == 'ok':
             self._reached(pose)
@@ -405,6 +442,17 @@ class Driver:
 
     def _start_next(self, pose):
         self.cur = self.queue.steps.pop(0)
+        if self.prev_xy is None:
+            self.prev_xy = (pose[0], pose[1])
+        if self.cur.guide and not self.in_guide:
+            # 안내 첫 출발: 떠나기 전에 앞(카메라)으로 손님을 기다린다
+            self.in_guide = True
+            self.check_xy = (pose[0], pose[1])
+            self._guide_request('greet', self.last_node or self.cur.node_id, self._depart)
+            return
+        self._depart(pose)
+
+    def _depart(self, pose):
         if self.last_drive is not None and self.cur.drive != self.last_drive:
             # 방향이 바뀜: 이 자리(lock 노드)에서 멈추고 돈다
             heading = math.atan2(self.cur.y - pose[1], self.cur.x - pose[0])
@@ -434,6 +482,10 @@ class Driver:
             self.io.nav_go(self.cur.x, self.cur.y, self.cur.yaw)
         elif self.phase == 'precision' or self.phase == 'align':
             self._request_precision(self.phase == 'align')
+        elif self.phase in ('guide_greet', 'guide_watch'):
+            self.guide_state = 'running'
+            self.io.guide({'action': 'greet' if self.phase == 'guide_greet' else 'watch',
+                           'node': self.cur.node_id if self.cur else self.last_node})
 
     def _reached(self, pose):
         step = self.cur
@@ -441,6 +493,12 @@ class Driver:
         self.last_drive = step.drive
         self.nav_state = ''
         self.io.event(NODE_REACHED, step.cmd_id, step.node_id, '')
+        nxt = self.queue.steps[0] if len(self.queue) else None
+        check = self._is_check(step, nxt)
+        self.prev_xy = (step.x, step.y)
+        if check:
+            self._begin_check(pose)
+            return
         stop = self.stops.get(step.node_id)
         if stop and stop['method'] == 'align':
             self.io.cmd_vel(0.0, 0.0)
@@ -487,12 +545,76 @@ class Driver:
         self.prec_detail = ''
         self.phase = 'idle'
         self.io.direction('STOP')
+        if self.cur.guide == GUIDE_END:
+            self.io.guide({'action': 'arrive', 'node': self.cur.node_id})  # 도착 효과 (기다리지 않음)
+
+    # ------------------------------------------------------------ 안내
+    def _is_check(self, step, nxt):
+        """안내 중 꺾이는 노드인가 (들어온 방향 vs 다음 노드로 나갈 방향)"""
+        if not (self.in_guide and step.guide and nxt and nxt.guide) or REVERSE in (step.drive, nxt.drive):
+            return False
+        if self.prev_xy is None:
+            return False
+        if self.check_xy and math.hypot(step.x - self.check_xy[0], step.y - self.check_xy[1]) < self.check_gap:
+            return False          # 방금 인사 · 확인한 자리 근처
+        h_in = math.atan2(step.y - self.prev_xy[1], step.x - self.prev_xy[0])
+        h_out = math.atan2(nxt.y - step.y, nxt.x - step.x)
+        return abs(wrap(h_out - h_in)) > self.check_turn
+
+    def _guide_request(self, action, node, after):
+        self.io.cmd_vel(0.0, 0.0)
+        self.io.nav_cancel()
+        self.io.direction('STOP')
+        self.phase = 'guide_greet' if action == 'greet' else 'guide_watch'
+        self.guide_state = 'running'
+        self.guide_after = after
+        self.io.guide({'action': action, 'node': node})
+
+    def _begin_check(self, pose):
+        """손님 확인 노드: 멈춤 -> 뒤로 돎 -> watch -> 다음 노드 쪽으로 돎 -> 이어 감"""
+        self.io.cmd_vel(0.0, 0.0)
+        self.io.nav_cancel()
+        self.io.direction('STOP')
+        node = self.cur.node_id
+        self.check_xy = (self.cur.x, self.cur.y)
+        self.phase = 'guide_turn'
+        self.turn_target = wrap(pose[2] + math.pi)
+        self.io.log(f'{node}: 손님 확인 (뒤로 돎)')
+
+        def after_back(p):
+            self._guide_request('watch', node, after_watch)
+
+        def after_watch(p):
+            nxt = self.queue.steps[0] if len(self.queue) else None
+            if nxt is None:  # 확인 노드가 줄 끝: 그대로 끝 처리
+                self._after_node(p)
+                return
+            heading = math.atan2(nxt.y - p[1], nxt.x - p[0])
+            self.phase = 'guide_turn'
+            self.turn_target = wrap(heading + math.pi) if nxt.drive == REVERSE else heading
+            self.guide_after = self._after_node
+
+        self.guide_after = after_back
+
+    def _guest_lost(self):
+        node = self.cur.node_id if self.cur else self.last_node
+        reason = f'guest_lost:{node}:{self.guide_detail or "not_seen"}'
+        self.io.log(f'손님을 놓침 -> 멈춤 ({reason})')
+        self.io.event(CMD_FAILED, self.queue.cmd_id, node, reason)
+        self.queue.clear()
+        self.cur = None
+        self.in_guide = False
+        self.guide_state = ''
+        self.phase = 'idle'
+        self.io.direction('STOP')
 
     def _stop_motion(self, keep=False, keep_dir=False):
         self.io.cmd_vel(0.0, 0.0)
         self.io.nav_cancel()
         if self.phase in ('align', 'precision'):
             self.io.precision_cancel()
+        if self.phase in ('guide_greet', 'guide_watch'):
+            self.io.guide_cancel()
         if not keep:
             self.nav_state = ''
             self.prec_state = ''

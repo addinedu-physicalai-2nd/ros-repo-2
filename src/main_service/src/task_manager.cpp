@@ -310,6 +310,12 @@ void TaskManager::onRobotEvent(const std::string& id, uint8_t type, uint32_t cmd
     // 로봇이 정밀 정차(마커 · 라인)를 못 했으면 reason에 이유를 담아 보낸다. 위치는 Nav2 기준으로 도착
     if (!reason.empty()) alert("WARN", id, node + " 정밀 정차 실패: " + reason);
     traffic_.onCmdDone(id, cmd_id, node);
+  } else if (type == EVENT_CMD_FAILED && reason.rfind("guest_lost", 0) == 0) {
+    // 안내 중 손님을 놓침: 로봇은 그 자리에 멈춰 있다 (고장 아님). 작업 실패 -> 쉬는 로봇 규칙대로 집으로
+    traffic_.abandon(id);
+    Task* t = findTask(r->task_id);
+    alert("WARN", id, "손님이 따라오지 않아 안내를 멈췄어요 (" + reason + ")");
+    if (t && !isEnded(t->stage)) enterStage(*t, Stage::FAILED);
   } else if (type == EVENT_CMD_FAILED) {
     traffic_.onCmdFailed(id);
     r->fault = true;
@@ -845,7 +851,9 @@ void TaskManager::enterStage(Task& t, Stage s) {
 void TaskManager::goTo(Task& t, const std::string& node) {
   t.goal_node = node;
   display(t.robot, stageText(t, t.stage), 0);  // 문구 먼저 (카운트다운 지움), 그다음 이동
-  if (!traffic_.setGoal(t.robot, node)) {
+  // 안내 손님과 같이 가는 길이면 Move.guide (인사 · 확인 · 도착 효과는 로봇이 알아서)
+  bool guide = t.kind == TaskKind::GUIDE && t.stage == Stage::TO_TABLE;
+  if (!traffic_.setGoal(t.robot, node, guide)) {
     alert("ERROR", t.robot, "task " + std::to_string(t.id) + " 경로를 만들 수 없어요");
     enterStage(t, Stage::FAILED);
   }

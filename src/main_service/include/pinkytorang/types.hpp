@@ -46,6 +46,11 @@ struct WaypointCmd {
   double yaw = 0.0;  // 로봇 앞이 보는 방향 (후진 중이면 진행 방향 + 180도)
 };
 
+// Move.guide (fleet_msgs v8)
+const uint8_t GUIDE_OFF = 0;  // 일반 주행
+const uint8_t GUIDE_ON = 1;   // 안내 중 (로봇이 출발 전 인사 · 꺾이는 곳 확인을 알아서)
+const uint8_t GUIDE_END = 2;  // 안내 중 + 이 Move의 끝이 안내 목적지
+
 // Move.drive (fleet_msgs v5~): Move 하나에 담긴 waypoints 전체의 주행 방향
 enum class Drive : uint8_t { FORWARD = 0, REVERSE = 1 };
 
@@ -53,6 +58,7 @@ struct MoveCmd {
   uint32_t cmd_id = 0;
   bool append = false;  // false = REPLACE, true = APPEND
   Drive drive = Drive::FORWARD;
+  uint8_t guide = GUIDE_OFF;
   std::vector<WaypointCmd> waypoints;
 };
 

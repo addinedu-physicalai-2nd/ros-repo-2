@@ -7,6 +7,7 @@
   /cmd_vel     직선 후진 · 제자리 회전 (REVERSE, 방향 바꿀 때)
   Docking 노드 /docking/request -> /docking/result   (정밀 정차 dock / align / tape)
   Obstacle 노드 /obstacle/status <- (막힘 · 종류),  /obstacle/direction -> (지금 볼 방향)
+  Guide 노드   /guide/request -> /guide/result      (안내: 손님 기다림 · 확인 · 효과). 없으면 바로 OK
   LCD          /lcd/text (std_msgs/String, LCD 드라이버가 받아 띄움)
 위치는 TF map -> base_link
 """
@@ -66,7 +67,9 @@ class FleetAgent(Node):
                              static_wait=p('static_wait_sec', 2.0).value, unknown_wait=p('unknown_wait_sec', 8.0).value)
         self.driver = Driver(self, stops, pass_tol=p('pass_tolerance', 0.08).value,
                              yaw_tol=p('yaw_tolerance', 0.15).value, done_grace=p('done_grace_sec', 0.5).value,
-                             reverse=rev, policy=policy, nav_retries=p('nav_retries', 1).value)
+                             reverse=rev, policy=policy, nav_retries=p('nav_retries', 1).value,
+                             check_turn_deg=p('guide_check_turn_deg', 45.0).value,
+                             check_gap=p('guide_check_gap_m', 0.8).value)
         self.driver.last_node = self.start_node
 
         # ---- fleet 토픽 (README 2.3 QoS)
@@ -87,6 +90,9 @@ class FleetAgent(Node):
         self.dir_pub = self.create_publisher(String, '/obstacle/direction', latched)
         self.create_subscription(String, '/docking/result', self.on_dock_result, reliable)
         self.create_subscription(String, '/obstacle/status', self.on_obstacle, 10)
+        self.guide_req_pub = self.create_publisher(String, '/guide/request', reliable)
+        self.guide_cancel_pub = self.create_publisher(String, '/guide/cancel', reliable)
+        self.create_subscription(String, '/guide/result', self.on_guide_result, reliable)
         if battery_topic:
             self.create_subscription(BatteryState, battery_topic, self.on_battery, 10)
 
@@ -98,6 +104,7 @@ class FleetAgent(Node):
 
         self.battery = float(self.battery_default)
         self.dock_req_id = 0
+        self.guide_req_id = 0
         self.lcd_text = ''
         self.lcd_count = 0
         self.lcd_override_text = None
@@ -112,10 +119,12 @@ class FleetAgent(Node):
     # ================================================================ 서버 -> 로봇
     def on_move(self, msg):
         wps = [(w.node_id, w.x, w.y, w.yaw) for w in msg.waypoints]
+        guide = getattr(msg, 'guide', 0)
         append = msg.mode == Move.APPEND
         self.get_logger().info(f'Move cmd {msg.cmd_id} {"APPEND" if append else "REPLACE"} '
-                               f'{"REVERSE" if msg.drive == Move.REVERSE else "FORWARD"} {[w[0] for w in wps]}')
-        self.driver.on_move(msg.cmd_id, append, msg.drive, wps)
+                               f'{"REVERSE" if msg.drive == Move.REVERSE else "FORWARD"}'
+                               f'{["", " 안내", " 안내 끝"][guide] if guide < 3 else ""} {[w[0] for w in wps]}')
+        self.driver.on_move(msg.cmd_id, append, msg.drive, wps, guide)
 
     def on_control(self, msg):
         self.get_logger().info(f'Control {["PAUSE", "RESUME", "CANCEL"][msg.command] if msg.command < 3 else msg.command}')
@@ -241,6 +250,31 @@ class FleetAgent(Node):
             return
         self.get_logger().info(f'정밀 정차 결과 {r}')
         self.driver.on_precision_result(bool(r.get('ok')), r.get('detail', ''))
+
+    def guide(self, req):
+        self.guide_req_id += 1
+        req = dict(req)
+        req['id'] = self.guide_req_id
+        if self.guide_req_pub.get_subscription_count() == 0:  # Guide 노드를 안 띄움 -> 손님 확인 없이 진행
+            self.get_logger().warn(f'Guide 노드 없음 -> {req["action"]} 건너뜀')
+            if req['action'] in ('greet', 'watch'):
+                self.driver.on_guide_result(True, 'no_guide_node')
+            return
+        self.guide_req_pub.publish(String(data=json.dumps(req)))
+        self.get_logger().info(f'안내 요청 {req}')
+
+    def guide_cancel(self):
+        self.guide_cancel_pub.publish(String(data=json.dumps({'id': self.guide_req_id})))
+
+    def on_guide_result(self, msg):
+        try:
+            r = json.loads(msg.data)
+        except ValueError:
+            return
+        if r.get('id') != self.guide_req_id:
+            return
+        self.get_logger().info(f'안내 결과 {r}')
+        self.driver.on_guide_result(bool(r.get('ok')), r.get('detail', ''))
 
     def direction(self, text):
         if text != self.last_dir:

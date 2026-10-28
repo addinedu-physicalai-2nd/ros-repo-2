@@ -106,6 +106,14 @@ WebSocket: `/ws/store` (snapshot에 `tables`, 로봇 `charging` 포함), `/ws/cu
 
 로봇이 정밀 정차(마커 · 라인)를 못 하면 `CMD_DONE.reason`에 이유가 오고, 매장 화면에 경고만 뜬다 (작업은 이어 감).
 
+## 안내 손님 확인 (fleet_msgs v8 Move.guide)
+
+서버는 안내 작업이 테이블로 갈 때 보내는 Move에 `guide`만 켠다 (`GUIDE_ON`, 테이블이 끝인 Move는 `GUIDE_END`).
+Move 로그에 `안내` / `안내 끝`으로 보인다. 인사 · 확인할 자리 · 도착 효과는 로봇이 정한다 (서버 설정 없음)
+- 로봇이 `CMD_FAILED reason=guest_lost:...`를 보내면: 고장으로 안 보고, 남은 경로 · lock을 버리고(`TrafficManager::abandon`) 안내 FAILED -> 테이블 풀림 -> 로봇은 집으로
+- 서빙 · 도킹 · 복귀 Move는 늘 `GUIDE_OFF`
+- 시뮬레이션: `SIM_GUEST_LOST=N3 main_service_sim ...` 이면 안내 중 N3에서 손님을 놓친 것으로
+
 ## 시험 설정 파일 (main_service_test.yaml)
 
 도킹 없이 아무 노드(N1 등)에서 로봇을 켜서 시험할 때. `main_service.yaml`과 같고 아래만 다르다

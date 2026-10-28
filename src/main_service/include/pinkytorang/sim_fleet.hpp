@@ -42,6 +42,7 @@ class SimFleet : public IFleetOut {
   struct Bot {
     std::string id;
     double x = 0.0, y = 0.0, yaw = 0.0;
+    bool guide = false;  // 지금 명령이 안내 (Move.guide)
     std::string last_node;
     uint32_t cmd_id = 0;
     bool running = false;            // 명령 수행 중
@@ -57,6 +58,7 @@ class SimFleet : public IFleetOut {
     uint8_t type;
     uint32_t cmd_id;
     std::string node;
+    std::string reason;
   };
 
   void loop();

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 
 #include "pinkytorang/log.hpp"
 
@@ -50,6 +51,7 @@ void SimFleet::sendMove(const std::string& robot_id, const MoveCmd& cmd) {
     b.cmd_id = cmd.cmd_id;
     b.dock_wait = 0.0;
   }
+  b.guide = cmd.guide != GUIDE_OFF;
   for (const WaypointCmd& w : cmd.waypoints) b.path.push_back({w, rev});
   b.running = true;
 }
@@ -113,6 +115,15 @@ void SimFleet::step(Bot& b, double dt, std::vector<PendingEvent>& out) {
     b.path.erase(b.path.begin());
     out.push_back({b.id, EVENT_NODE_REACHED, b.cmd_id, w.node_id});
 
+    // 안내 시험: 환경 변수 SIM_GUEST_LOST=<노드> 면 안내 중 그 노드에서 손님을 놓친 것으로
+    const char* lost = std::getenv("SIM_GUEST_LOST");
+    if (b.guide && lost && w.node_id == lost) {
+      b.path.clear();
+      b.running = false;
+      out.push_back({b.id, EVENT_CMD_FAILED, b.cmd_id, w.node_id, "guest_lost:" + w.node_id + ":sim"});
+      return;
+    }
+
     if (b.path.empty()) {  // 명령의 마지막 노드
       b.yaw = w.yaw;
       const MapNode* n = map_.node(w.node_id);
@@ -153,7 +164,7 @@ void SimFleet::loop() {
     //    (Task Manager는 안에서 sendMove를 부르고, sendMove는 이 자물쇠를 잡는다.
     //     자물쇠를 쥔 채로 부르면 서로 기다리다 멈춘다 = 교착)
     if (!tasks_) continue;
-    for (const PendingEvent& e : events) tasks_->onRobotEvent(e.robot_id, e.type, e.cmd_id, e.node, "");
+    for (const PendingEvent& e : events) tasks_->onRobotEvent(e.robot_id, e.type, e.cmd_id, e.node, e.reason);
     for (const Bot& b : states) {
       uint8_t st = b.paused ? 2 : (b.running ? 1 : 0);
       tasks_->onRobotState(b.id, b.x, b.y, b.yaw, st, b.last_node, static_cast<float>(b.battery));

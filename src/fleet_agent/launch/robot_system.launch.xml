@@ -24,6 +24,8 @@
   <arg name="agent_delay" default="0.0"/>    <!-- fleet_agent까지 (초). initial_pose가 AMCL을 알아서 기다려서 0이면 됨 -->
   <arg name="set_initial_pose" default="true"/>   <!-- false = RViz 2D Pose Estimate로 직접 -->
   <arg name="start_yaw" default=""/>   <!-- 켤 때 로봇 앞 방향(rad). 비우면 node_graph의 yaw (없으면 0) -->
+  <arg name="use_guide" default="false"/>   <!-- 안내 손님 확인 노드 (카메라 토픽 필요) -->
+  <arg name="guide_model" default=""/>      <!-- YOLO .pt. 비우면 확인 없이 OK -->
   <arg name="spin_deg" default="0"/>   <!-- 초기 위치 뒤 제자리 회전. 360 = 한 바퀴 (도킹 없이 N 노드에서 켤 때) -->
   <arg name="node_graph" default="$(find-pkg-share fleet_msgs)/docs/node_graph.yaml"/>
 
@@ -49,6 +51,8 @@
     <include file="$(find-pkg-share fleet_agent)/launch/fleet_agent.launch.xml">
       <arg name="robot_id" value="$(var robot_id)"/>
       <arg name="start_node" value="$(var start_node)"/>
+      <arg name="use_guide" value="$(var use_guide)"/>
+      <arg name="guide_model" value="$(var guide_model)"/>
     </include>
   </timer>
 </launch>

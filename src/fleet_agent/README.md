@@ -81,6 +81,25 @@ ros2 launch fleet_agent robot_system.launch.xml robot_id:=pinky2 start_node:=D2
 - 도킹 없이 N 노드에서 시험: `start_yaw:=<rad>`(로봇 앞 방향), `spin_deg:=360`(초기 위치 뒤 제자리 한 바퀴로 AMCL 맞춤)
   서버는 `main_service_test.yaml`로 켠다 (켤 때 노드에서 대기, 작업 끝나면 거기로 돌아감)
 
+## 안내 (guide_node) - 손님 확인
+
+서버는 안내 Move에 `guide`만 켜서 보낸다 (fleet_msgs v8 `Move.guide`). 나머지는 fleet_agent가 정한다
+
+| 언제 | 로봇 동작 |
+|---|---|
+| 안내 Move를 처음 받았을 때 (출발 전) | 앞 카메라로 손님 기다림 -> 찾으면 환영 효과 -> 출발 |
+| 꺾이는 노드 (방향이 `guide_check_turn_deg` 45도 넘게 바뀜) | 그 노드에서 섬 -> 뒤로 돎 -> 손님 확인 -> 다음 노드 쪽으로 돎 -> 이어 감 |
+| `GUIDE_END` Move 끝 (안내 테이블) | 도착 효과 (LCD 얼굴 · LED · 부저) |
+
+- 바로 전 인사 · 확인 자리에서 `guide_check_gap_m`(0.8m) 안의 꺾임은 건너뛴다 (맵이 작아서). 지금 맵 기준 확인 자리:
+  T1·T2 = N1 / T3 = N1 / T4 = N1, N3 / T5 = N1, N8 / T6 = N1, N3, N9
+- 못 찾으면(`wait_sec` 30초) 그 자리에 멈추고 `CMD_FAILED reason="guest_lost:<노드>:<이유>"` -> 서버가 안내 실패 처리, 로봇은 집으로
+- YOLO는 guide 노드(별도 프로세스)에서 확인하는 동안에만 `infer_hz`로 돈다. 주행(fleet_agent)을 막지 않는다
+- 켜기: `ros2 launch fleet_agent robot_system.launch.xml ... use_guide:=true guide_model:=$HOME/models/guest.pt`
+  - 카메라 토픽 `camera_topic`(기본 /camera/image_raw)을 내는 노드가 따로 있어야 한다
+  - guide 노드를 안 켜면 손님 확인을 건너뛰고 바로 진행, 모델이 없으면 guide 노드가 바로 OK (흐름 시험용)
+- 필요: `pip install ultralytics` (로봇 파이썬 환경)
+
 ## 노드 순회 시험 (node_tour) - 서버 없이 Nav2 node to node 확인
 
 서버(main_service)는 끄고, 로봇에서 `frun N1 -1.57 360`으로 켠 뒤 다른 터미널에서:

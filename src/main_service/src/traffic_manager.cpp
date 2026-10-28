@@ -100,6 +100,10 @@ std::string TrafficManager::lastSentNode(const std::string& id) const {
 // ---------------------------------------------------------------- 목적지
 
 bool TrafficManager::setGoal(const std::string& id, const std::string& node) {
+  return setGoal(id, node, false);
+}
+
+bool TrafficManager::setGoal(const std::string& id, const std::string& node, bool guide) {
   Robot& r = robots_[id];
   if (!r.localized) return false;
   if (map_.shortestPath(lastSent(r), node).empty()) {
@@ -112,6 +116,7 @@ bool TrafficManager::setGoal(const std::string& id, const std::string& node) {
   r.via = "";
   r.avoid.clear();
   r.waiting = false;
+  r.guide = guide;
   logLine("TRAFFIC", id + " 목적지 " + node);
   checkArrival(r);              // 이미 거기 있으면 바로 도착
   if (!r.goal.empty()) tryExtend(r);
@@ -121,6 +126,7 @@ bool TrafficManager::setGoal(const std::string& id, const std::string& node) {
 void TrafficManager::clearGoal(const std::string& id) {
   Robot& r = robots_[id];
   r.goal = "";
+  r.guide = false;
   r.plan.clear();
   r.via = "";
   r.waiting = false;
@@ -202,6 +208,23 @@ void TrafficManager::onCmdDone(const std::string& id, uint32_t cmd_id, const std
 
 void TrafficManager::onCmdFailed(const std::string& id) {
   robots_[id].cmd_active = false;
+}
+
+void TrafficManager::abandon(const std::string& id) {
+  Robot& r = robots_[id];
+  for (auto it = lock_.begin(); it != lock_.end();) {
+    if (it->second == id && it->first != r.at) it = lock_.erase(it);
+    else ++it;
+  }
+  for (auto it = edge_lock_.begin(); it != edge_lock_.end();) {
+    if (it->second == id) it = edge_lock_.erase(it);
+    else ++it;
+  }
+  r.committed.clear();
+  r.cmd_active = false;
+  clearGoal(id);
+  logLine("TRAFFIC", id + " 멈춤 · 남은 경로 버림 (" + r.at + ")");
+  tick();  // 풀린 lock을 기다리던 로봇
 }
 
 // ---------------------------------------------------------------- 멈춤 · 재전송
@@ -512,6 +535,7 @@ void TrafficManager::publish(Robot& r, const std::vector<std::string>& nodes, bo
     cmd.cmd_id = r.cmd_id;
     cmd.append = app;
     cmd.drive = rev[start] ? Drive::REVERSE : Drive::FORWARD;
+    if (r.guide) cmd.guide = (nodes[end] == r.goal) ? GUIDE_END : GUIDE_ON;
 
     std::string text;
     for (size_t i = start; i <= end; ++i) {
@@ -524,9 +548,11 @@ void TrafficManager::publish(Robot& r, const std::vector<std::string>& nodes, bo
       cmd.waypoints.push_back(w);
       if (i > start) text += ", ";
       text += n->id;
+
     }
     logLine("TRAFFIC", r.id + " Move(cmd " + std::to_string(cmd.cmd_id) + ", " + (app ? "APPEND" : "REPLACE") +
-                           ", " + (rev[start] ? "REVERSE" : "FORWARD") + ", [" + text + "])");
+                           ", " + (rev[start] ? "REVERSE" : "FORWARD") +
+                           (cmd.guide == GUIDE_END ? ", 안내 끝" : cmd.guide ? ", 안내" : "") + ", [" + text + "])");
     if (fleet_) fleet_->sendMove(r.id, cmd);
     start = end + 1;
   }
