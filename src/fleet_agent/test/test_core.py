@@ -336,6 +336,57 @@ def test_guide_replace_during_watch_cancels():
     assert reached(r)[-1] == 'N0'
 
 
+class LeaveRobot(FakeRobot):
+    """leave 정밀 동작 흉내: undock은 N15에서 남쪽(축)을 보게 옮겨 놓고, Nav2 호출 수를 센다"""
+
+    def __init__(self, *a):
+        super().__init__(*a)
+        self.nav_calls = []
+        self.teleport = None
+
+    def nav_go(self, x, y, yaw):
+        self.nav_calls.append((round(x, 3), round(y, 3)))
+        super().nav_go(x, y, yaw)
+
+    def precision(self, req):
+        super().precision(req)
+        if req['method'] == 'undock':
+            self.teleport = (3.398, 1.550, -math.pi / 2 + 0.05)   # 마커로 맞춘 축 (지도와 약간 다름)
+
+    def step(self, dt):
+        fired = self.prec_pending and self.prec_wait <= 0
+        if fired and self.teleport:
+            self.x, self.y, self.yaw = self.teleport
+            self.teleport = None
+        super().step(dt)
+
+
+def test_d4_leave_undock_axis_reverse_tape_then_tape_exit():
+    stops = dict(STOPS)
+    stops['D4'] = {'method': 'dock', 'marker': 2, 'back': 0.1,
+                   'leave': {'method': 'undock', 'to': 'N15', 'hold_axis': True}}
+    stops['P1'] = {'method': 'tape', 'leave': {'method': 'tape_exit'}}
+    r = LeaveRobot(3.548, 1.550, math.pi)
+    d = Driver(r, stops, reverse=ReverseControl(speed=0.1), policy=BlockPolicy())
+    r.driver = d
+    d.last_node, d.leave_from, d.last_drive = 'D4', 'D4', REVERSE
+    d.on_move(70, False, FORWARD, [('N15', 3.398, 1.550, -1.5708)])
+    d.on_move(70, True, REVERSE, [('P2', 3.398, 2.100, -1.5708)])
+    d.on_move(70, True, REVERSE, [('P1', 3.398, 2.600, 3.1416)])
+    t = run(r, d, 40)
+    assert r.prec == ['D4:undock', 'P1:tape']          # D4를 떠날 때 undock, P1에서 tape
+    assert r.nav_calls == []                           # N15까지 Nav2 안 씀
+    assert reached(r) == ['N15', 'P2', 'P1']
+    assert [n for tt, n, _ in r.events if tt == CMD_DONE] == ['P1']
+    assert abs(wrap(r.yaw - (-math.pi / 2 + 0.05))) < 0.05   # 축 그대로 (출발 회전 · P1 yaw 회전 안 함)
+    assert abs(r.y - 2.600) < 0.04
+    d.on_move(71, False, FORWARD, [('N4', 3.0, 2.6, 3.1416)])
+    run(r, d, 20, t0=t)
+    assert r.prec == ['D4:undock', 'P1:tape', 'P1:tape_exit']   # P1을 떠날 때 테이프 빼기 먼저
+    assert r.nav_calls and r.nav_calls[0] == (3.0, 2.6)
+    assert reached(r)[-1] == 'N4'
+
+
 if __name__ == '__main__':
     for name, fn in list(globals().items()):
         if name.startswith('test_'):

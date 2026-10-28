@@ -4,7 +4,14 @@
 # method
 #   dock  : 마커로 정렬한 뒤 back 만큼 후진해서 주차. 끝나면 CMD_DONE (marker_dock.py v4.3)
 #   align : 마커로 위치·방향만 맞추고 다음 Move를 이어 간다. 방향을 바꾸는 노드에서 쓴다
-#   tape  : 바닥 테이프 라인트레이싱으로 정렬. 끝나면 CMD_DONE (마지막 노드일 때)
+#   tape  : 바닥 테이프(E자)로 바구니를 픽업대에 넣음. 끝나면 CMD_DONE (마지막 노드일 때)
+#
+# leave (선택): 그 노드에서 CMD_DONE 한 뒤 다음 출발 전에 하는 정밀 동작 (켤 때 서 있던 노드도 해당)
+#   undock    : 마커로 나올 자리(to)까지 + turn_deg 회전 + 방위각 정렬. to 노드 도착으로 치고 Nav2는 안 씀
+#               target = ~/dock_target_<target>.json  (ros2 run fleet_agent marker_dock --id <marker> --name <target> --record)
+#               align  = ~/align_<align>.json         (ros2 run fleet_agent marker_align --id <ID> --size 0.05 --name <align> --record)
+#               hold_axis: true -> 이어지는 후진(N15 -> P2 -> P1)을 맞춘 방향 그대로 (회전 · 끝 yaw 회전 생략)
+#   tape_exit : 앞으로 가며 테이프 선을 세서 exit_legs번째(기본 2 = 새 선)에서 정지 -> 그다음 Nav2
 #
 # 마커 ID와 back 거리는 예시다. 마커를 붙이고 --record 한 뒤 실제 값으로 바꾼다.
 # 목록에 없는 노드는 Nav2 / odom 도착만으로 끝낸다.
@@ -14,9 +21,11 @@ N14: {method: align, markers: [5, 6]}   # 5 = 오른쪽 바깥 벽 (멈춤 위�
 D1:  {method: dock, marker: 1, back: 0.0}   # 마커: 왼쪽 바깥 벽 (로봇 앞)
 D2:  {method: dock, marker: 2, back: 0.0}
 D3:  {method: dock, marker: 3, back: 0.10}  # 마커: 통로 건너 오른쪽 안쪽 벽 (로봇 앞)
-D4:  {method: dock, marker: 4, back: 0.10}
+D4:  {method: dock, marker: 2, back: 0.10,   # D4 벽 마커 실측 ID 2
+      leave: {method: undock, marker: 2, target: n15, to: N15, turn_deg: 90, align: n14, hold_axis: true}}
 
-P1:  {method: tape}                          # 바구니(뒤)를 주방 픽업대에 넣음
+P1:  {method: tape, x_after: 0.035,          # 바구니(뒤)를 주방 픽업대에 넣음 (E자 테이프)
+      leave: {method: tape_exit, exit_legs: 2}}  # 받은 뒤 새 선까지 빼고 Nav2 (N4)
 
 # 테이블 정차: 테이프로 정밀하게 넣을 예정 (잠정. 방식이 정해지면 수정)
 T1:  {method: tape}

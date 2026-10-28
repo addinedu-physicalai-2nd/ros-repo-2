@@ -8,7 +8,10 @@ fleet_agent <-> docking 인터페이스 (std_msgs/String, JSON)
 방법 -> 구현
   dock  : docking/marker_dock.py  Docker.dock(마커 marker의 목표 파일) -> back(m)만큼 후진   (D1~D4)
   align : 같은 Docker로 markers를 차례로 (안 보이면 돌며 찾기)                              (N14: 5 -> 6)
-  tape  : docking/line_dock.py    LineDocker.run (추후 라인트레이싱)                         (P1, T1~T6)
+  tape  : docking/line_dock.py    LineDocker.run  E자 테이프로 바구니를 픽업대에              (P1)
+  (leave = 노드를 떠날 때, precision_stops의 <노드>.leave)
+  undock    : docking/undock.py   마커로 나올 자리까지 + 회전 + 방위각 정렬                  (D3/D4 -> N16/N15)
+  tape_exit : docking/line_dock.py LineDocker.leave  앞으로 빼서 새 선에서 정지              (P1 -> 그다음 Nav2)
   마커 목표 파일은 혼자 실행으로 미리 저장: ros2 run fleet_agent marker_dock --record --id <마커>
 
 - 정밀 정차는 시간이 걸리고 멈춰서 재는 동작이라 따로 스레드에서 돈다 (TF는 노드 executor가 받음)
@@ -24,11 +27,12 @@ from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy
 
 from geometry_msgs.msg import Twist
-from std_msgs.msg import String
+from std_msgs.msg import String, UInt16MultiArray
 from tf2_ros import Buffer, TransformListener
 
 from .docking import marker_dock as md
 from .docking.line_dock import LineDocker
+from .docking.undock import undock
 
 
 class DockingNode(Node):
@@ -42,6 +46,9 @@ class DockingNode(Node):
         self.create_subscription(String, '/docking/cancel', self.on_cancel, reliable)
         self.tf_buf = Buffer()
         self.tf_listener = TransformListener(self.tf_buf, self)
+        self.ir = {'v': None, 'n': 0}      # 바닥 센서 (tape · tape_exit)
+        self.create_subscription(UInt16MultiArray, self.declare_parameter('ir_topic', '/ir_sensor/range').value,
+                                 self.on_ir, 10)
 
         self.cam = None            # 처음 마커 도킹 때 열고 계속 씀
         self.job = None            # 지금 요청
@@ -69,6 +76,10 @@ class DockingNode(Node):
         self.get_logger().info(f'{req.get("node")} {req.get("method")} 시작 {req}')
         threading.Thread(target=self.run, args=(req,), daemon=True).start()
 
+    def on_ir(self, msg):
+        self.ir['v'] = list(msg.data[:3])
+        self.ir['n'] += 1
+
     def on_cancel(self, msg):
         with self.lock:
             if self.job is not None:
@@ -94,7 +105,11 @@ class DockingNode(Node):
             elif method == 'align':
                 result = self.run_align(req)
             elif method == 'tape':
-                result = LineDocker(self, self.cmd_pub, self.cancelled).run(req)
+                result = LineDocker(self, self.cmd_pub, self.cancelled, self.tf_buf, self.ir).run(req)
+            elif method == 'tape_exit':
+                result = LineDocker(self, self.cmd_pub, self.cancelled, self.tf_buf, self.ir).leave(req)
+            elif method == 'undock':
+                result = self.run_undock(req)
             else:
                 result = f'실패: 모르는 method {method}'
         except md.Cancelled:
@@ -134,6 +149,10 @@ class DockingNode(Node):
             left = dk.back_off(back)
             md.log(f'[후진] {back * 100:.1f} cm (남은 {left * 1000:+.1f} mm)')
         return result
+
+    def run_undock(self, req):
+        dk = self.docker(int(req['marker']), f'{req.get("node")}_undock')
+        return undock(self, self.cmd_pub, self.cancelled, self.tf_buf, dk.cam, req)
 
     def run_align(self, req):
         result = '실패: markers 없음'

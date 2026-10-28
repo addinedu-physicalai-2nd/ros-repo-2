@@ -26,11 +26,15 @@
   <arg name="start_yaw" default=""/>   <!-- 켤 때 로봇 앞 방향(rad). 비우면 node_graph의 yaw (없으면 0) -->
   <arg name="use_guide" default="false"/>   <!-- 안내 손님 확인 노드 (카메라 토픽 필요) -->
   <arg name="guide_model" default=""/>      <!-- YOLO .pt. 비우면 확인 없이 OK -->
-  <arg name="spin_deg" default="0"/>   <!-- 초기 위치 뒤 제자리 회전. 360 = 한 바퀴 (도킹 없이 N 노드에서 켤 때) -->
+  <arg name="spin_deg" default="0"/>
+  <arg name="use_ir" default="true"/>         <!-- 바닥 센서 노드 (pinky_sensor_adc main_node, P1 E자 테이프) -->
+  <arg name="use_docking" default="false"/>   <!-- 정밀 정차 (도킹 · 언도킹 · 테이프). 켜면 precision_stops도 같이 -->
+  <arg name="precision_stops" default=""/>    <!-- 예: $(find-pkg-share fleet_msgs)/docs/precision_stops.yaml -->   <!-- 초기 위치 뒤 제자리 회전. 360 = 한 바퀴 (도킹 없이 N 노드에서 켤 때) -->
   <arg name="node_graph" default="$(find-pkg-share fleet_msgs)/docs/node_graph.yaml"/>
 
-  <!-- 1. bringup -->
+  <!-- 1. bringup (+ 바닥 센서) -->
   <include file="$(find-pkg-share $(var bringup_pkg))/launch/$(var bringup_file)"/>
+  <node pkg="pinky_sensor_adc" exec="main_node" name="sensor_adc" output="screen" if="$(var use_ir)"/>
 
   <!-- 2. Nav2 -->
   <timer period="$(var nav_delay)">
@@ -53,6 +57,8 @@
       <arg name="start_node" value="$(var start_node)"/>
       <arg name="use_guide" value="$(var use_guide)"/>
       <arg name="guide_model" value="$(var guide_model)"/>
+      <arg name="use_docking" value="$(var use_docking)"/>
+      <arg name="precision_stops" value="$(var precision_stops)"/>
     </include>
   </timer>
 </launch>

@@ -594,11 +594,12 @@ def main():
 
     ap = argparse.ArgumentParser()
     ap.add_argument('--id', type=int, default=2, help='마커 ID (기본 2)')
+    ap.add_argument('--name', default=None, help='목표 이름 (같은 마커로 목표 여러 개, 예: n15 언도킹 자리) -> ~/dock_target_<name>.json')
     ap.add_argument('--record', action='store_true', help='현재 위치를 도킹 목표로 저장')
     ap.add_argument('--calibrate', action='store_true', help='odom으로 카메라 거리 보정 (마커 정면 25~35 cm)')
     ap.add_argument('--dry-run', action='store_true', help='바퀴를 움직이지 않고 계획만 출력')
     args, _ = ap.parse_known_args()   # ros2 run 이 붙이는 --ros-args는 무시
-    target_file = target_file_of(args.id)
+    target_file = os.path.expanduser(f'~/dock_target_{args.name}.json') if args.name else target_file_of(args.id)
 
     tag = 'record' if args.record else 'calib' if args.calibrate else 'dry' if args.dry_run else 'run'
     open_log(tag)

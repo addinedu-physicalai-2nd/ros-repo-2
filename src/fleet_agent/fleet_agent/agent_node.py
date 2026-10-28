@@ -71,6 +71,7 @@ class FleetAgent(Node):
                              check_turn_deg=p('guide_check_turn_deg', 45.0).value,
                              check_gap=p('guide_check_gap_m', 0.8).value)
         self.driver.last_node = self.start_node
+        self.driver.leave_from = self.start_node   # 켤 때 선 노드에 leave(언도킹 등)가 있으면 첫 출발 때 먼저
 
         # ---- fleet 토픽 (README 2.3 QoS)
         reliable = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE)

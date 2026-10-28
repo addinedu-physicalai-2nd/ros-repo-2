@@ -30,6 +30,7 @@ setup(
             'node_tour = fleet_agent.node_tour:main',
             'guide_node = fleet_agent.guide_node:main',         # 안내: 카메라 YOLO 손님 확인 · 효과           # 시험: 서버 없이 노드 순회 (Nav2 node to node)
             'marker_dock = fleet_agent.docking.marker_dock:main',   # 혼자 실행: --calibrate / --record / --dry-run
+            'marker_align = fleet_agent.docking.marker_align:main', # 혼자 실행: 정렬 기준 --record (undock의 align)
         ],
     },
 )

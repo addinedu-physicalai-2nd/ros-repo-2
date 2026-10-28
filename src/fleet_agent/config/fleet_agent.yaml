@@ -24,6 +24,7 @@ fleet_agent:
 docking:
   ros__parameters:
     timeout_sec: 40.0            # 이 안에 못 끝내면 멈추고 Nav2 위치 인정 (마커 도킹 v4.2는 보통 10~25초)
+    ir_topic: /ir_sensor/range   # 바닥 센서 3개 (pinky_sensor_adc main_node). tape · tape_exit에서 씀
 
 obstacle:
   ros__parameters:
