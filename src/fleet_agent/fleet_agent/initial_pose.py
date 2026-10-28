@@ -32,6 +32,7 @@ class InitialPose(Node):
         self.left = int(self.get_parameter('repeat').value)
         self.timeout = float(self.get_parameter('timeout_sec').value)
         self.done = False
+        self.yaw_known = False
         self.spin_left = math.radians(float(self.get_parameter('spin_deg').value))
         self.spin_speed = abs(float(self.get_parameter('spin_speed').value)) or 0.6
         self.pose = self.find_pose(self.get_parameter('node_graph').value, self.start_node)
@@ -39,8 +40,13 @@ class InitialPose(Node):
             self.done = True
             return
         yaw_txt = str(self.get_parameter('start_yaw').value).strip()
+        self.yaw_std = 0.1                    # 방향을 알 때: 파티클을 +-0.1rad 안에만
         if yaw_txt:
             self.pose = (self.pose[0], self.pose[1], float(yaw_txt))
+        elif not self.yaw_known:
+            self.yaw_std = 1.0                # 방향을 모름: 넓게 뿌리고 회전 · 주행하며 LiDAR로 맞춤
+            self.get_logger().warn(f'{self.start_node}에 yaw가 없고 start_yaw도 안 줌 -> 방향 0, 파티클을 넓게 뿌림 '
+                                   '(start_yaw:=<rad> 주는 걸 권장)')
 
         self.pub = self.create_publisher(PoseWithCovarianceStamped, '/initialpose', 10)
         self.cmd = self.create_publisher(Twist, self.get_parameter('cmd_vel_topic').value, 10)
@@ -61,6 +67,7 @@ class InitialPose(Node):
             return None
         for n in nodes:
             if n['id'] == node_id:
+                self.yaw_known = 'yaw' in n
                 return float(n['x']), float(n['y']), float(n.get('yaw', 0.0))
         self.get_logger().error(f'node_graph에 {node_id} 없음')
         return None
@@ -84,7 +91,7 @@ class InitialPose(Node):
         m.pose.pose.orientation.w = math.cos(yaw / 2.0)
         m.pose.covariance[0] = 0.05 ** 2    # x
         m.pose.covariance[7] = 0.05 ** 2    # y
-        m.pose.covariance[35] = 0.1 ** 2    # yaw
+        m.pose.covariance[35] = self.yaw_std ** 2    # yaw
         self.pub.publish(m)
         self.left -= 1
         if self.left <= 0:

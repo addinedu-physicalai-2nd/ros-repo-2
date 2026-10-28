@@ -81,6 +81,18 @@ ros2 launch fleet_agent robot_system.launch.xml robot_id:=pinky2 start_node:=D2
 - 도킹 없이 N 노드에서 시험: `start_yaw:=<rad>`(로봇 앞 방향), `spin_deg:=360`(초기 위치 뒤 제자리 한 바퀴로 AMCL 맞춤)
   서버는 `main_service_test.yaml`로 켠다 (켤 때 노드에서 대기, 작업 끝나면 거기로 돌아감)
 
+## 노드 순회 시험 (node_tour) - 서버 없이 Nav2 node to node 확인
+
+서버(main_service)는 끄고, 로봇에서 `frun N1 -1.57 360`으로 켠 뒤 다른 터미널에서:
+```bash
+ros2 run fleet_agent node_tour                     # 기본: 홀 N1 -> N13 지그재그 -> N1 (T 노드도 지나감)
+ros2 run fleet_agent node_tour N1 N4 N13 N11 N1    # 목표 노드만 적으면 사이 노드는 길 찾기로 채움
+ros2 run fleet_agent node_tour --step 2 N1 N4 N1   # 목표마다 멈춰 2초 쉬고
+ros2 run fleet_agent node_tour --loops 3
+```
+노드마다 걸린 시간 · 도착 때 위치 오차(TF vs 노드 좌표)를 찍고, 끝나면 표로 정리한다. Ctrl+C = 멈추고 결과 출력.
+후진 구간 · 도킹 · 픽업은 목표로 적지 않으면 안 지나간다 (전진 주행만).
+
 ## 실제 로봇 시험 (정밀 정차 끔)
 
 지금은 도킹(마커 · 라인)을 빼고 **주문 → P1에서 5초 대기 → 테이블 → 도킹 자리로 복귀**만 한다.
