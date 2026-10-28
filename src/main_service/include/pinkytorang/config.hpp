@@ -67,6 +67,7 @@ struct Config {
   double ready_battery_pct = 80.0; // 충전 중이면 이 이상이 돼야 다시 배정
 
   bool require_dock_start = true;  // 처음 위치는 도킹 노드에서만 인정
+  bool stay_at_start = false;      // 시험용: 도킹 대신 켤 때 노드를 집으로 (쉬면 거기서 대기, 작업 끝나면 거기로 돌아감)
   double comm_timeout_sec = 3.0; // state가 이만큼 안 오면 통신 끊김
   int lock_lookahead = 2;        // 로봇 앞으로 미리 잡아 두는 lock 노드 수
   double detour_max_m = 1.0;     // 앞 로봇이 움직이는 중이면, 우회가 이만큼(m) 이하로 길어질 때만 돌아간다

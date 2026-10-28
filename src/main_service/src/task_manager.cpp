@@ -289,6 +289,7 @@ void TaskManager::onRobotState(const std::string& id, double x, double y, double
     std::string reason;
     if (traffic_.localize(id, last_node, x, y, reason)) {
       r->loc_problem = "";
+      r->start_node = traffic_.currentNode(id);
       afterChange();
     } else if (reason != r->loc_problem) {
       r->loc_problem = reason;
@@ -378,8 +379,10 @@ void TaskManager::afterChange() {
   dispatchGuide();
   dispatchServe();
   sendIdleRobotsHome();
-  fixDockConflicts();
-  rebalanceStandby();
+  if (!cfg_.stay_at_start) {  // 시험 모드에서는 도킹 자리 맞추기 · 입구 대기 배치를 안 함
+    fixDockConflicts();
+    rebalanceStandby();
+  }
   processArrivals();
 }
 
@@ -542,7 +545,8 @@ void TaskManager::sendIdleRobotsHome() {
     Robot& r = pair.second;
     if (!robotUsable(r) || r.task_id >= 0 || r.homing || !traffic_.isStationary(r.id)) continue;
     const MapNode* here = map_.node(traffic_.currentNode(r.id));
-    if (!here || here->stop_kind == "DOCK") continue;
+    if (!here) continue;
+    if (cfg_.stay_at_start ? here->id == r.start_node : here->stop_kind == "DOCK") continue;  // 이미 집
     std::string dock = pickDockFor(r.id);
     if (dock.empty()) continue;
     if (traffic_.setGoal(r.id, dock)) {
@@ -587,6 +591,10 @@ bool TaskManager::wantEntrance(const std::string& robot_id) const {
 }
 
 std::string TaskManager::pickDockFor(const std::string& robot_id) const {
+  if (cfg_.stay_at_start) {  // 시험 모드: 켤 때 노드로 돌아감
+    auto it = robots_.find(robot_id);
+    if (it != robots_.end() && !it->second.start_node.empty()) return it->second.start_node;
+  }
   return dispatch_.pickDock(robot_id, wantEntrance(robot_id));
 }
 

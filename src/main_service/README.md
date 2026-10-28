@@ -106,6 +106,17 @@ WebSocket: `/ws/store` (snapshot에 `tables`, 로봇 `charging` 포함), `/ws/cu
 
 로봇이 정밀 정차(마커 · 라인)를 못 하면 `CMD_DONE.reason`에 이유가 오고, 매장 화면에 경고만 뜬다 (작업은 이어 감).
 
+## 시험 설정 파일 (main_service_test.yaml)
+
+도킹 없이 아무 노드(N1 등)에서 로봇을 켜서 시험할 때. `main_service.yaml`과 같고 아래만 다르다
+- `stay_at_start: true`: 켤 때 노드가 집. 쉬면 거기서 대기, 작업이 끝나면 도킹 대신 거기로 돌아감
+- `entrance_standby_quiet/busy: 0`: 입구 대기 배치 안 함
+- `db_path: ../pinkytorang_test.db`: 운영 DB와 따로
+
+```bash
+ros2 run pinkytorang_main main_service src/main_service/config/main_service_test.yaml
+```
+
 ## 빌드 · 실행
 
 ```bash

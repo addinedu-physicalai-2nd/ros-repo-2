@@ -23,6 +23,8 @@
   <arg name="nav_delay" default="2.0"/>      <!-- bringup 뒤 Nav2까지 (초). Nav2에서 tf 에러가 계속 나면 늘림 -->
   <arg name="agent_delay" default="0.0"/>    <!-- fleet_agent까지 (초). initial_pose가 AMCL을 알아서 기다려서 0이면 됨 -->
   <arg name="set_initial_pose" default="true"/>   <!-- false = RViz 2D Pose Estimate로 직접 -->
+  <arg name="start_yaw" default=""/>   <!-- 켤 때 로봇 앞 방향(rad). 비우면 node_graph의 yaw (없으면 0) -->
+  <arg name="spin_deg" default="0"/>   <!-- 초기 위치 뒤 제자리 회전. 360 = 한 바퀴 (도킹 없이 N 노드에서 켤 때) -->
   <arg name="node_graph" default="$(find-pkg-share fleet_msgs)/docs/node_graph.yaml"/>
 
   <!-- 1. bringup -->
@@ -41,6 +43,8 @@
     <node pkg="fleet_agent" exec="initial_pose" name="initial_pose" output="screen" if="$(var set_initial_pose)">
       <param name="start_node" value="$(var start_node)"/>
       <param name="node_graph" value="$(var node_graph)"/>
+      <param name="start_yaw" value="$(var start_yaw)"/>
+      <param name="spin_deg" value="$(var spin_deg)"/>
     </node>
     <include file="$(find-pkg-share fleet_agent)/launch/fleet_agent.launch.xml">
       <arg name="robot_id" value="$(var robot_id)"/>

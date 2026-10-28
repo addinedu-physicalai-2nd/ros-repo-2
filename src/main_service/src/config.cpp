@@ -48,6 +48,7 @@ bool loadConfig(const std::string& path, Config& cfg, std::string& error) {
     if (root["min_battery_pct"]) cfg.min_battery_pct = root["min_battery_pct"].as<double>();
     if (root["ready_battery_pct"]) cfg.ready_battery_pct = root["ready_battery_pct"].as<double>();
     if (root["require_dock_start"]) cfg.require_dock_start = root["require_dock_start"].as<bool>();
+    if (root["stay_at_start"]) cfg.stay_at_start = root["stay_at_start"].as<bool>();
     if (root["comm_timeout_sec"]) cfg.comm_timeout_sec = root["comm_timeout_sec"].as<double>();
     if (root["lock_lookahead"]) cfg.lock_lookahead = root["lock_lookahead"].as<int>();
     if (root["detour_max_m"]) cfg.detour_max_m = root["detour_max_m"].as<double>();

@@ -108,6 +108,7 @@ class TaskManager {
     bool charging = false;  // 배터리 부족: 배정 안 함
     bool error_alerted = false;
     std::string loc_problem;
+    std::string start_node;          // 처음 위치 확인된 노드 (stay_at_start면 여기가 집)
     bool bad = false;                // 고장 또는 통신 끊김
     Clock::time_point bad_since;
     bool stuck_alerted = false;      // 실은 채 멈춤 알림 보냄

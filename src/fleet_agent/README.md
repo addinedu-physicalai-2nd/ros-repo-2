@@ -78,6 +78,8 @@ ros2 launch fleet_agent robot_system.launch.xml robot_id:=pinky2 start_node:=D2
   D 좌표가 안 맞으면 `set_initial_pose:=false`로 끄고 RViz로 맞춘다
 - 맵 · Nav2 설정 바꾸기: `map:=... params_file:=...` (기본 ~/maps/pinkytorang_map_v4.yaml, ~/params/config4.yaml)
 - Nav2에서 tf 에러가 계속 나면 `nav_delay:=5`
+- 도킹 없이 N 노드에서 시험: `start_yaw:=<rad>`(로봇 앞 방향), `spin_deg:=360`(초기 위치 뒤 제자리 한 바퀴로 AMCL 맞춤)
+  서버는 `main_service_test.yaml`로 켠다 (켤 때 노드에서 대기, 작업 끝나면 거기로 돌아감)
 
 ## 실제 로봇 시험 (정밀 정차 끔)
 
