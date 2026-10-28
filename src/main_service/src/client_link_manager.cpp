@@ -426,6 +426,8 @@ void ClientLinkManager::pushSnapshot(const SnapshotView& snap) {
     o["yaw"] = r.yaw;
     o["state"] = robotStateName(r.state);
     o["last_node"] = r.last_node;
+    o["next_node"] = r.next_node;
+    o["goal_node"] = r.goal_node;
     o["battery"] = r.battery;
     if (r.task_id >= 0) o["task_id"] = r.task_id;
     else o["task_id"] = nullptr;

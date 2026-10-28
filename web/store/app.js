@@ -228,6 +228,7 @@ function renderRobots() {
         <dl class="robot-meta">
           <dt>작업</dt><dd>${t ? `${esc(t.table || '')} ${KIND_TEXT[t.kind] || ''} · ${STAGE_TEXT[t.stage] || esc(t.stage)}` : (r.task_id != null ? `#${esc(r.task_id)}` : '없음')}</dd>
           <dt>마지막 노드</dt><dd class="num">${esc(r.last_node || '-')}</dd>
+          <dt>다음 · 목적지</dt><dd class="num">${r.goal_node ? `${esc(r.next_node || '-')} → ${esc(r.goal_node)}` : '-'}</dd>
           <dt>배터리</dt><dd class="batt"><span class="batt-bar"><i class="${batt < 30 ? 'low' : ''}" style="width:${Math.max(0, Math.min(100, batt))}%"></i></span><span class="num">${batt}%</span></dd>
         </dl>
         <div class="robot-actions">

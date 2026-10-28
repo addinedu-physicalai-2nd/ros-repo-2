@@ -6,12 +6,11 @@ web_root: ../../../web             # pinkytorang/web (고객 · 매장 · 입구
 db_path: ../pinkytorang.db      # 없으면 새로 만든다
 node_graph: ../../fleet_msgs/docs/node_graph.yaml     # fleet_msgs v7.1 docs/node_graph.yaml 복사본 (그림 node_map_v7.png). ros-repo-2에 올리면 ../../fleet_msgs/docs/node_graph.yaml 로 바꾸고 복사본은 지움
 
-# 키오스크 배치도에 그릴 범위 (map 좌표, m) = 실측 노드(pinkytorang_waypoints.yaml) 기준으로 옛 범위를 옮긴 값 [추정]
-board_x: -0.235
-board_y: -1.399
-board_w: 2.50
-board_h: 2.19
-board_flip: true                # 새 맵은 매장 그림과 180도 거꾸로라 배치도를 돌려 그림 (입구가 왼쪽 위)
+# 키오스크 배치도에 그릴 범위 (map 좌표, m) = SLAM 맵 fleet_msgs/docs/maps/project_map_v2 (49 x 42칸, 5 cm, origin [1.323, 0.875])
+board_x: 1.323
+board_y: 0.875
+board_w: 2.45
+board_h: 2.10
 
 # 서버 쪽 토픽 앞에 붙는 로봇 ID (/pinky1/fleet/...)
 robots: [pinky1, pinky2, pinky3]
@@ -19,8 +18,6 @@ robots: [pinky1, pinky2, pinky3]
 # ---- 작업 규칙
 table_timeout_sec: 30           # 서빙: 손님 수령 카운트다운
 guide_timeout_sec: 15           # 안내: 착석 확인 카운트다운
-pickup_timeout_sec: 5           # 픽업: 0 = 주방 '적재 완료' 버튼으로만. 실제 로봇 시험 중이라 5초 뒤 자동 출발
-auto_ready: true                # true = 주문하면 바로 조리 완료 (주방 버튼 없이). 실제 로봇 시험용, 운영 땐 false
 depart_grace_sec: 2             # 카운트다운 0 이후 실제 출발까지
 max_active_serve: 2             # 빈 테이블이 있을 때 동시 서빙 최대 (만석이면 로봇 전부)
 max_active_guide: 1             # 동시 안내 최대
@@ -38,21 +35,21 @@ entrance_keep_penalty_m: 1.5    # 서빙 배정 때 입구 로봇에 더하는 �
 
 # ---- 테이블 (id = node_graph의 table 값). 손님이 입구 키오스크 배치도에서 빈 테이블을 직접 고른다
 #      x, y = 배치도에 그릴 테이블 중심 (map 좌표, m), w, h = 크기 (m)
-#      [추정] 정차점 T + 옛 맵의 테이블 간격을 새 맵 방향으로 옮긴 값. 새 맵은 옛 맵과 약 180도 돌아가 있어 테이블이 정차점 -y 쪽
+#      SLAM 맵(project_map_v2)의 테이블 칸에서 읽은 값. 테이블은 정차점 위쪽 (로봇 바구니가 위를 봄)
 tables:
-  - {id: T1, x: 1.258, y: -1.064, w: 0.150, h: 0.150}   # 위쪽 벽 테이블 왼쪽
-  - {id: T2, x: 0.816, y: -1.094, w: 0.150, h: 0.150}   # 위쪽 벽 테이블 오른쪽
-  - {id: T3, x: 1.269, y: -0.738, w: 0.150, h: 0.200}   # 가운데 줄 왼쪽
-  - {id: T4, x: 0.806, y: -0.746, w: 0.150, h: 0.200}   # 가운데 줄 오른쪽
-  - {id: T5, x: 1.192, y: -0.265, w: 0.150, h: 0.200}   # 아래 줄 왼쪽
-  - {id: T6, x: 0.742, y: -0.296, w: 0.150, h: 0.200}   # 아래 줄 오른쪽
+  - {id: T1, x: 2.348, y: 2.750, w: 0.150, h: 0.150}   # 위쪽 벽 테이블 왼쪽 (정차 T1 = 2.348, 2.600)
+  - {id: T2, x: 2.798, y: 2.750, w: 0.150, h: 0.150}   # 위쪽 벽 테이블 오른쪽
+  - {id: T3, x: 2.348, y: 2.325, w: 0.150, h: 0.200}   # 가운데 줄 왼쪽
+  - {id: T4, x: 2.798, y: 2.325, w: 0.150, h: 0.200}   # 가운데 줄 오른쪽
+  - {id: T5, x: 2.348, y: 1.875, w: 0.150, h: 0.200}   # 아래 줄 왼쪽
+  - {id: T6, x: 2.798, y: 1.875, w: 0.150, h: 0.200}   # 아래 줄 오른쪽
 
 # ---- 배터리 (%) : 로봇 fleet/state 의 battery 값. 0 으로 두면 검사 안 함
 min_battery_pct: 30             # 작업이 끝날 때마다 확인: 이보다 낮으면 새 작업 · 이어받기 안 하고 도킹에서 충전 (도킹에서 충전된다고 가정)
 ready_battery_pct: 80           # 충전 중인 로봇은 이 이상이 돼야 다시 배정
 
 # ---- 시작 규칙
-require_dock_start: true        # 로봇은 도킹 위에서 켠다. 처음 위치가 도킹이 아니면 배정 안 함 (알림)
+require_dock_start: false        # 로봇은 도킹 위에서 켠다. 처음 위치가 도킹이 아니면 배정 안 함 (알림)
 
 # ---- 교통
 comm_timeout_sec: 3.0           # fleet/state가 이만큼 안 오면 통신 끊김

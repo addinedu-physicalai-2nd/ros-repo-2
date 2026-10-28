@@ -85,6 +85,12 @@ std::string TrafficManager::currentNode(const std::string& id) const {
   return it->second.at;
 }
 
+std::string TrafficManager::nextNode(const std::string& id) const {
+  auto it = robots_.find(id);
+  if (it == robots_.end() || it->second.committed.empty()) return "";
+  return it->second.committed.front();
+}
+
 std::string TrafficManager::lastSentNode(const std::string& id) const {
   auto it = robots_.find(id);
   if (it == robots_.end()) return "";

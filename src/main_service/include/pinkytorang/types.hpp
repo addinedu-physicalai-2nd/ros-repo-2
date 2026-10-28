@@ -96,6 +96,8 @@ struct RobotView {
   double yaw = 0.0;
   uint8_t state = 0;      // RobotRunState 값
   std::string last_node;
+  std::string next_node;  // 다음에 도착할 노드 ("" = 없음)
+  std::string goal_node;  // 목적지 ("" = 없음)
   double battery = 0.0;
   int task_id = -1;       // -1 = 없음
   bool online = false;

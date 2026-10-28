@@ -1012,6 +1012,8 @@ SnapshotView TaskManager::buildSnapshot() {
     v.yaw = r.yaw;
     v.state = r.state;
     v.last_node = traffic_.isLocalized(id) ? traffic_.currentNode(id) : r.last_node;
+    v.next_node = traffic_.nextNode(id);
+    v.goal_node = traffic_.goalOf(id);
     v.battery = r.battery;
     v.task_id = r.task_id;
     v.online = r.online;

@@ -48,6 +48,7 @@ class TrafficManager {
   bool localize(const std::string& id, const std::string& last_node, double x, double y, std::string& reason);
   bool isLocalized(const std::string& id) const;
   std::string currentNode(const std::string& id) const;   // 마지막 도착 노드
+  std::string nextNode(const std::string& id) const;      // 다음에 도착할 노드 (보낸 명령 중 첫 칸, "" = 없음)
   std::string lastSentNode(const std::string& id) const;  // 보낸 경로의 끝 (다음 계획의 출발점)
 
   // ---- 목적지
