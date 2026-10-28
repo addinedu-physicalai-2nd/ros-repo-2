@@ -26,10 +26,13 @@ bool loadConfig(const std::string& path, Config& cfg, std::string& error) {
     if (root["board_y"]) cfg.board_y = root["board_y"].as<double>();
     if (root["board_w"]) cfg.board_w = root["board_w"].as<double>();
     if (root["board_h"]) cfg.board_h = root["board_h"].as<double>();
+    if (root["board_flip"]) cfg.board_flip = root["board_flip"].as<bool>();
     if (root["robots"]) cfg.robots = root["robots"].as<std::vector<std::string>>();
     if (root["table_timeout_sec"]) cfg.table_timeout_sec = root["table_timeout_sec"].as<int>();
     if (root["depart_grace_sec"]) cfg.depart_grace_sec = root["depart_grace_sec"].as<int>();
     if (root["guide_timeout_sec"]) cfg.guide_timeout_sec = root["guide_timeout_sec"].as<int>();
+    if (root["pickup_timeout_sec"]) cfg.pickup_timeout_sec = root["pickup_timeout_sec"].as<int>();
+    if (root["auto_ready"]) cfg.auto_ready = root["auto_ready"].as<bool>();
     if (root["max_active_serve"]) cfg.max_active_serve = root["max_active_serve"].as<int>();
     if (root["max_active_guide"]) cfg.max_active_guide = root["max_active_guide"].as<int>();
     if (root["serve_batch_max"]) cfg.serve_batch_max = root["serve_batch_max"].as<int>();

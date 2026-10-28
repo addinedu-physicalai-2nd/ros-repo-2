@@ -97,6 +97,15 @@ WebSocket: `/ws/store` (snapshot에 `tables`, 로봇 `charging` 포함), `/ws/cu
 - **짧은 형식**: `nodes`(`{id, x, y}` + `kind`), `edges`(양방향 사슬), `oneway`(일방 사슬)
 - 공통: `reverse`(후진 구간, 첫 · 끝 노드는 lock 노드), `two_way_zones`(선택)
 
+## 시험용 설정 (실제 로봇 첫 시험)
+
+| 설정 | 지금 값 | 운영 값 | 뜻 |
+|---|---|---|---|
+| `auto_ready` | true | false | 주문하면 주방 '조리 완료' 없이 바로 출발 |
+| `pickup_timeout_sec` | 5 | 0 | P1에서 '적재 완료' 버튼 없이 5초 뒤 테이블로 (0 = 버튼으로만) |
+
+로봇이 정밀 정차(마커 · 라인)를 못 하면 `CMD_DONE.reason`에 이유가 오고, 매장 화면에 경고만 뜬다 (작업은 이어 감).
+
 ## 빌드 · 실행
 
 ```bash

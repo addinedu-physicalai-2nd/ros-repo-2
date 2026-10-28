@@ -103,6 +103,11 @@ ApiResult TaskManager::createOrder(const std::string& table, const std::vector<O
   record("ORDER", "order " + std::to_string(t.order_id) + " " + table + " " + summary + " -> 조리 중");
   if (client_) client_->pushTaskUpdate(view(t));
   dirty_ = true;
+  if (cfg_.auto_ready) {  // 시험용: 주방 버튼 없이 바로 조리 완료
+    record("TASK", "task " + std::to_string(t.id) + " 조리 완료 (auto_ready)");
+    enterStage(tasks_[t.id], Stage::WAITING);
+    afterChange();
+  }
 
   ApiResult ok;
   ok.task_id = t.id;
@@ -301,6 +306,8 @@ void TaskManager::onRobotEvent(const std::string& id, uint8_t type, uint32_t cmd
   if (type == EVENT_NODE_REACHED) {
     traffic_.onNodeReached(id, node);
   } else if (type == EVENT_CMD_DONE) {
+    // 로봇이 정밀 정차(마커 · 라인)를 못 했으면 reason에 이유를 담아 보낸다. 위치는 Nav2 기준으로 도착
+    if (!reason.empty()) alert("WARN", id, node + " 정밀 정차 실패: " + reason);
     traffic_.onCmdDone(id, cmd_id, node);
   } else if (type == EVENT_CMD_FAILED) {
     traffic_.onCmdFailed(id);
@@ -818,7 +825,7 @@ void TaskManager::enterStage(Task& t, Stage s) {
       }
       break;
     }
-    case Stage::AT_PICKUP: openConfirm(t, Confirm::LOADED, 0); break;
+    case Stage::AT_PICKUP: openConfirm(t, Confirm::LOADED, cfg_.pickup_timeout_sec); break;  // 0 = 버튼으로만
     case Stage::AT_TABLE:
       if (t.kind == TaskKind::SERVE) openConfirm(t, Confirm::RECEIVED, cfg_.table_timeout_sec);
       else openConfirm(t, Confirm::SEATED, cfg_.guide_timeout_sec);
@@ -839,7 +846,7 @@ void TaskManager::goTo(Task& t, const std::string& node) {
 void TaskManager::openConfirm(Task& t, Confirm c, int countdown) {
   t.pending = c;
   t.countdown = countdown;
-  t.has_timeout = countdown > 0;  // 테이블만 시간 초과 있음, 주방은 버튼으로만
+  t.has_timeout = countdown > 0;  // 테이블은 시간 초과 있음. 주방은 pickup_timeout_sec가 0이면 버튼으로만
   if (t.has_timeout) t.timeout_at = Clock::now() + std::chrono::seconds(countdown + cfg_.depart_grace_sec);
   display(t.robot, stageText(t, t.stage), countdown);
 

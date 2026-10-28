@@ -38,10 +38,13 @@ struct Config {
   double board_y = 0.0;
   double board_w = 2.28;  // 판 크기 (m)
   double board_h = 1.82;
+  bool board_flip = false; // true = 배치도를 180도 돌려 그림 (맵이 매장 그림과 거꾸로 만들어졌을 때)
   std::vector<std::string> robots = {"pinky1", "pinky2", "pinky3"};
 
   int table_timeout_sec = 30;    // 서빙: 손님 수령 카운트다운
   int guide_timeout_sec = 15;    // 안내: 착석 확인 카운트다운
+  int pickup_timeout_sec = 0;    // 픽업: 0 = 주방 적재 버튼으로만, 0보다 크면 이만큼 기다렸다 자동 출발 (시험용)
+  bool auto_ready = false;       // true = 주문하면 조리 완료로 바로 (주방 버튼 없이, 시험용)
   int depart_grace_sec = 2;      // 카운트다운 0 이후 실제 출발까지
   int max_active_serve = 2;      // 빈 테이블이 있을 때 동시에 서빙하는 로봇 최대 수 (만석이면 로봇 수 전부)
   int max_active_guide = 1;      // 동시에 안내하는 로봇 최대 수

@@ -61,7 +61,9 @@ function renderFloor() {
   const floor = $('floor');
   floor.style.width = W + 'px';
   floor.style.height = H + 'px';
-  const px = (x) => (x - state.board.x) * scale, py = (y) => H - (y - state.board.y) * scale;  // map 좌표 -> 화면
+  const b = state.board;
+  const px0 = (x) => (x - b.x) * scale, py0 = (y) => H - (y - b.y) * scale;  // map 좌표 -> 화면
+  const px = b.flip ? (x) => W - px0(x) : px0, py = b.flip ? (y) => H - py0(y) : py0;  // flip = 180도 돌려 그림
 
   let html = state.tables.map((t) => {
     const w = Math.max(MIN_W, (t.w || 0.165) * scale), h = Math.max(MIN_H, (t.h || 0.11) * scale);
