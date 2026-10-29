@@ -368,7 +368,7 @@ def test_d4_leave_undock_axis_reverse_tape_then_tape_exit():
     stops = dict(STOPS)
     stops['D4'] = {'method': 'dock', 'marker': 2, 'back': 0.1,
                    'leave': {'method': 'undock', 'to': 'N15', 'hold_axis': True}}
-    stops['P1'] = {'method': 'tape', 'leave': {'method': 'tape_exit'}}
+    stops['P1'] = {'method': 'tape', 'leave': {'method': 'tape_exit', 'quiet_to_next': True}}
     r = LeaveRobot(3.548, 1.550, math.pi)
     d = Driver(r, stops, reverse=ReverseControl(speed=0.1), policy=BlockPolicy())
     r.driver = d
@@ -385,7 +385,11 @@ def test_d4_leave_undock_axis_reverse_tape_then_tape_exit():
     assert getattr(r, 'approach_seen', False)          # P2 -> P1은 좌표 대신 tape가 가로선으로
     assert abs(r.y - 2.640) < 0.01
     d.on_move(71, False, FORWARD, [('N4', 3.0, 2.6, 3.1416)])
-    run(r, d, 20, t0=t)
+
+    def wall(tt):
+        d.set_obstacle('STATIC')          # P1 -> N4 좁은 틈: LiDAR엔 벽이 가깝게 보임
+    run(r, d, 20, t0=t, hook=wall)
+    assert not [e for e in r.events if e[0] == EV_BLOCKED]   # quiet_to_next라 N4까지 안 멈춤
     assert r.prec == ['D4:undock', 'P1:tape', 'P1:tape_exit']   # P1을 떠날 때 테이프 빼기 먼저
     assert r.nav_calls and r.nav_calls[0] == (3.0, 2.6)
     assert reached(r)[-1] == 'N4'

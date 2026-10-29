@@ -303,6 +303,7 @@ class Driver:
         self.axis = None              # 축 고정 후진 방향 (leave hold_axis로 정함, FORWARD 출발 때 해제)
         self.axis_odom = None         # 같은 축을 odom yaw로 (방향 유지는 이것으로)
         self.prec_done_node = ''      # tape_approach로 정밀 정차를 이미 끝낸 노드
+        self.quiet_obstacle = False   # leave quiet_to_next: 다음 노드 도착까지 LiDAR 장애물 판단 안 함 (좁은 틈 통과)
         self.skip_turn = False        # 다음 방향 바뀜 회전 생략 (축을 이미 맞춤)
 
     # ------------------------------------------------------------ 입력
@@ -384,7 +385,7 @@ class Driver:
         self.now = now
         if pose is None or self.paused or self.error:
             return
-        moving = self.phase in ('nav', 'reverse')   # 정밀 동작(tape 등) 중에는 장애물 판단 안 함
+        moving = self.phase in ('nav', 'reverse') and not self.quiet_obstacle   # 정밀 동작(tape 등) 중에는 장애물 판단 안 함
         if moving or self.holding:
             ask, report = self.policy.update(now, self.obstacle)
             if self.obstacle:
@@ -451,6 +452,8 @@ class Driver:
             if self.prec_state == 'ok':
                 self.prec_state = ''
                 req, self.leave_req = self.leave_req or {}, None
+                if self.prec_ok and req.get('quiet_to_next'):
+                    self.quiet_obstacle = True
                 if self.prec_ok and req.get('hold_axis'):
                     self.axis = pose[2]
                     self.axis_odom = self._odom_yaw()
@@ -573,6 +576,7 @@ class Driver:
 
     def _reached(self, pose):
         step = self.cur
+        self.quiet_obstacle = False
         self.last_node = step.node_id
         self.last_drive = step.drive
         self.nav_state = ''

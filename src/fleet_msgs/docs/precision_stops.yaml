@@ -12,6 +12,7 @@
 #               align  = ~/align_<align>.json         (ros2 run fleet_agent marker_align --id <ID> --size 0.05 --name <align> --record)
 #               hold_axis: true -> 이어지는 후진(N15 -> P2 -> P1)을 맞춘 방향 그대로 (회전 · 끝 yaw 회전 생략)
 #   tape_exit : 앞으로 가며 테이프 선을 세서 exit_legs번째(기본 2 = 새 선)에서 정지 -> 그다음 Nav2
+#   quiet_to_next: true -> leave 뒤 다음 노드에 닿을 때까지 LiDAR 장애물 정지를 끔 (P1 -> N4 좁은 틈. Nav2 costmap은 그대로)
 #
 # 마커 ID와 back 거리는 예시다. 마커를 붙이고 --record 한 뒤 실제 값으로 바꾼다.
 # 목록에 없는 노드는 Nav2 / odom 도착만으로 끝낸다.
@@ -25,7 +26,7 @@ D4:  {method: dock, marker: 2, back: 0.10,   # D4 벽 마커 실측 ID 2
       leave: {method: undock, marker: 2, target: n15, to: N15, turn_deg: 90, align: n14, hold_axis: true}}
 
 P1:  {method: tape, x_after: 0.035,          # 바구니(뒤)를 주방 픽업대에 넣음 (E자 테이프)
-      leave: {method: tape_exit, exit_legs: 2}}  # 받은 뒤 새 선까지 빼고 Nav2 (N4)
+      leave: {method: tape_exit, exit_legs: 2, quiet_to_next: true}}  # 받은 뒤 새 선까지 빼고 Nav2 (N4). N4까지 좁은 틈이라 LiDAR 정지 끔
 
 # 테이블 정차: 테이프로 정밀하게 넣을 예정 (잠정. 방식이 정해지면 수정)
 T1:  {method: tape}
