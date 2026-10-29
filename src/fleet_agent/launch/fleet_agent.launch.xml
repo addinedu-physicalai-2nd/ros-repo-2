@@ -5,7 +5,8 @@
   정밀 정차(마커 도킹 · 라인)는 지금 끔. 켤 때:
     ... use_docking:=true precision_stops:=$(ros2 pkg prefix fleet_msgs)/share/fleet_msgs/docs/precision_stops.yaml
 
-  안내 손님 확인(카메라 YOLO): use_guide:=true guide_model:=<모델.pt>
+  안내 손님 확인(카메라 YOLO): use_guide:=true   (모델 기본값 = 패키지에 든 models/best.pt)
+    다른 모델: guide_model:=<모델.pt>,  모델 없이 흐름만 시험: guide_model:=""
     guide 노드가 없으면 fleet_agent는 손님 확인을 건너뛰고 바로 진행한다. 모델이 없으면 guide 노드가 바로 OK
 -->
 <launch>
@@ -15,7 +16,7 @@
   <arg name="precision_stops" default=""/>   <!-- 비우면 정밀 정차 안 함 -->
   <arg name="use_docking" default="false"/>
   <arg name="use_guide" default="false"/>
-  <arg name="guide_model" default=""/>   <!-- YOLO 모델 (.pt). 비우면 손님 확인 없이 OK -->
+  <arg name="guide_model" default="$(find-pkg-share fleet_agent)/models/best.pt"/>   <!-- YOLO 모델. "" = 손님 확인 없이 OK -->
 
   <node pkg="fleet_agent" exec="fleet_agent" name="fleet_agent" output="screen">
     <param from="$(var params)"/>

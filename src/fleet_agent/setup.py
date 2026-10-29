@@ -13,6 +13,7 @@ setup(
         ('share/' + package_name, ['package.xml']),
         ('share/' + package_name + '/launch', glob('launch/*.launch.xml')),
         ('share/' + package_name + '/config', glob('config/*.yaml')),
+        ('share/' + package_name + '/models', glob('models/*.pt')),   # 안내 손님 확인 YOLO (best.pt)
     ],
     install_requires=['setuptools'],
     zip_safe=True,

@@ -42,7 +42,7 @@ guide:
   ros__parameters:
     camera_topic: /camera/image_raw   # sensor_msgs/Image (bgr8 / rgb8)
     camera_compressed: false          # true = sensor_msgs/CompressedImage
-    class_name: PerfectFigure         # YOLO 클래스 이름 (손님)
+    class_name: toy_person            # YOLO 클래스 이름 (손님). models/best.pt = yolov8n: toy_person / toy_car / cone
     conf: 0.5
     infer_hz: 4.0                     # 확인 중에만 이만큼 YOLO (라즈베리파이 CPU)
     confirm: 2                        # 연속으로 이만큼 보이면 찾음

@@ -25,7 +25,7 @@
   <arg name="set_initial_pose" default="true"/>   <!-- false = RViz 2D Pose Estimate로 직접 -->
   <arg name="start_yaw" default=""/>   <!-- 켤 때 로봇 앞 방향(rad). 비우면 node_graph의 yaw (없으면 0) -->
   <arg name="use_guide" default="false"/>   <!-- 안내 손님 확인 노드 (카메라 토픽 필요) -->
-  <arg name="guide_model" default=""/>      <!-- YOLO .pt. 비우면 확인 없이 OK -->
+  <arg name="guide_model" default="$(find-pkg-share fleet_agent)/models/best.pt"/>   <!-- YOLO. "" = 확인 없이 OK -->
   <arg name="spin_deg" default="0"/>
   <arg name="use_ir" default="true"/>         <!-- 바닥 센서 노드 (pinky_sensor_adc main_node, P1 E자 테이프) -->
   <arg name="use_docking" default="false"/>   <!-- 정밀 정차 (도킹 · 언도킹 · 테이프). 켜면 precision_stops도 같이 -->
