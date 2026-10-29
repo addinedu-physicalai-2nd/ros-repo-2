@@ -5,7 +5,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from fleet_agent.core import (GUIDE_END, GUIDE_OFF, GUIDE_ON, CMD_DONE, CMD_FAILED, EV_BLOCKED, FORWARD, NODE_REACHED, REVERSE, BlockPolicy, Driver,  # noqa: E402
+from fleet_agent.core import (CMD_DONE, CMD_FAILED, EV_BLOCKED, FORWARD, NODE_REACHED, REVERSE, BlockPolicy, Driver,  # noqa: E402
                               ObstacleClass, ReverseControl, wrap)
 
 STOPS = {
@@ -260,12 +260,12 @@ def auto_ok(r, d, ok=True):
 def test_guide_greet_first_then_arrive_effect():
     r, d = make(0.0, 0.0, 0.0, last_drive=FORWARD)
     d.last_node = 'D1'
-    d.on_move(60, False, FORWARD, [('N1', 1.0, 0.0, 0.0)], GUIDE_ON)
+    d.on_move(60, False, FORWARD, [('N1', 1.0, 0.0, 0.0)], True, 'T1')
     t = run(r, d, 2)
     assert r.guides == [('greet', 'D1', 0.0)]       # 떠나기 전에 손님 기다림
     assert abs(r.x) < 1e-6 and reached(r) == []
     d.on_guide_result(True, 'guest_seen')
-    d.on_move(60, True, FORWARD, [('T1', 2.0, 0.0, 0.0)], GUIDE_END)
+    d.on_move(60, True, FORWARD, [('T1', 2.0, 0.0, 0.0)], True, 'T1')
     run(r, d, 20, t0=t)
     assert reached(r) == ['N1', 'T1']                # 곧은 길: 확인 없이 지나감
     assert [g[0] for g in r.guides] == ['greet', 'arrive']
@@ -275,7 +275,7 @@ def test_guide_greet_first_then_arrive_effect():
 def test_guide_checks_at_corner_only():
     r, d = make(0.0, 0.0, 0.0, last_drive=FORWARD)
     d.on_move(61, False, FORWARD, [('N1', 1.0, 0.0, 0.0), ('N2', 2.0, 0.0, 0.0), ('N3', 2.0, 1.0, 1.5708)],
-              GUIDE_END)
+              True, 'N3')
     yaw_at_watch = []
     ok = auto_ok(r, d)
 
@@ -292,7 +292,7 @@ def test_guide_checks_at_corner_only():
 
 def test_guide_guest_lost_stops_and_reports():
     r, d = make(0.0, 0.0, 0.0, last_drive=FORWARD)
-    d.on_move(62, False, FORWARD, [('N1', 1.0, 0.0, 0.0), ('N2', 1.0, 1.0, 1.5708)], GUIDE_ON)
+    d.on_move(62, False, FORWARD, [('N1', 1.0, 0.0, 0.0), ('N2', 1.0, 1.0, 1.5708)], True, 'N9')
     ok = auto_ok(r, d)
 
     def hook(t):
@@ -309,12 +309,12 @@ def test_guide_guest_lost_stops_and_reports():
 
 def test_guide_resend_does_not_greet_again_and_serve_never_greets():
     r, d = make(0.0, 0.0, 0.0, last_drive=FORWARD)
-    d.on_move(63, False, FORWARD, [('N1', 1.0, 0.0, 0.0)], GUIDE_ON)
+    d.on_move(63, False, FORWARD, [('N1', 1.0, 0.0, 0.0)], True, 'N5')
     run(r, d, 15, hook=auto_ok(r, d))
-    d.on_move(64, False, FORWARD, [('N2', 2.0, 0.0, 0.0)], GUIDE_ON)      # 통신 끊김 뒤 다시 보냄 (새 REPLACE)
+    d.on_move(64, False, FORWARD, [('N2', 2.0, 0.0, 0.0)], True, 'N5')      # 통신 끊김 뒤 다시 보냄 (새 REPLACE)
     run(r, d, 15, t0=15, hook=auto_ok(r, d))
     assert [g[0] for g in r.guides] == ['greet']
-    d.on_move(65, False, FORWARD, [('N3', 3.0, 0.0, 0.0)], GUIDE_OFF)     # 안내 끝 -> 복귀
+    d.on_move(65, False, FORWARD, [('N3', 3.0, 0.0, 0.0)], False, 'N3')     # 안내 끝 -> 복귀
     run(r, d, 15, t0=30)
     assert [g[0] for g in r.guides] == ['greet'] and not d.in_guide
     assert reached(r) == ['N1', 'N2', 'N3']
@@ -322,7 +322,7 @@ def test_guide_resend_does_not_greet_again_and_serve_never_greets():
 
 def test_guide_replace_during_watch_cancels():
     r, d = make(0.0, 0.0, 0.0, last_drive=FORWARD)
-    d.on_move(66, False, FORWARD, [('N1', 1.0, 0.0, 0.0), ('N2', 1.0, 1.0, 1.5708)], GUIDE_ON)
+    d.on_move(66, False, FORWARD, [('N1', 1.0, 0.0, 0.0), ('N2', 1.0, 1.0, 1.5708)], True, 'N9')
     ok = auto_ok(r, d)
 
     def hook(t):
@@ -330,7 +330,7 @@ def test_guide_replace_during_watch_cancels():
             ok(t)
     t = run(r, d, 20, hook=hook)
     assert d.phase == 'guide_watch'
-    d.on_move(67, False, FORWARD, [('N0', 0.0, 0.0, 3.14)], GUIDE_OFF)
+    d.on_move(67, False, FORWARD, [('N0', 0.0, 0.0, 3.14)], False, 'N0')
     assert r.guide_cancels == 1
     run(r, d, 15, t0=t)
     assert reached(r)[-1] == 'N0'
@@ -393,6 +393,63 @@ def test_d4_leave_undock_axis_reverse_tape_then_tape_exit():
     assert r.prec == ['D4:undock', 'P1:tape', 'P1:tape_exit']   # P1을 떠날 때 테이프 빼기 먼저
     assert r.nav_calls and r.nav_calls[0] == (3.0, 2.6)
     assert reached(r)[-1] == 'N4'
+
+
+def test_d4_flow_with_goal_node_v9():
+    # 같은 흐름을 v9 서버처럼 goal_node를 붙여 보냄 (도착지 P1, 다음 이동 도착지 N4)
+    stops = dict(STOPS)
+    stops['D4'] = {'method': 'dock', 'marker': 2, 'back': 0.1,
+                   'leave': {'method': 'undock', 'to': 'N15', 'hold_axis': True}}
+    stops['P1'] = {'method': 'tape', 'leave': {'method': 'tape_exit', 'quiet_to_next': True}}
+    r = LeaveRobot(3.548, 1.550, math.pi)
+    d = Driver(r, stops, reverse=ReverseControl(speed=0.1), policy=BlockPolicy())
+    r.driver = d
+    d.last_node, d.leave_from, d.last_drive = 'D4', 'D4', REVERSE
+    d.on_move(70, False, FORWARD, [('N15', 3.398, 1.550, -1.5708)], False, 'P1')
+    d.on_move(70, True, REVERSE, [('P2', 3.398, 2.100, -1.5708)], False, 'P1')
+    d.on_move(70, True, REVERSE, [('P1', 3.398, 2.600, 3.1416)], False, 'P1')
+    t = run(r, d, 40)
+    assert r.prec == ['D4:undock', 'P1:tape']          # D4를 떠날 때 undock, P1에서 tape
+    assert r.nav_calls == []                           # N15까지 Nav2 안 씀
+    assert reached(r) == ['N15', 'P2', 'P1']
+    assert [n for tt, n, _ in r.events if tt == CMD_DONE] == ['P1']
+    assert abs(wrap(r.yaw - (-math.pi / 2 + 0.05))) < 0.05   # 축 그대로 (출발 회전 · P1 yaw 회전 안 함)
+    assert getattr(r, 'approach_seen', False)          # P2 -> P1은 좌표 대신 tape가 가로선으로
+    assert abs(r.y - 2.640) < 0.01
+    d.on_move(71, False, FORWARD, [('N4', 3.0, 2.6, 3.1416)], False, 'T1')
+
+    def wall(tt):
+        d.set_obstacle('STATIC')          # P1 -> N4 좁은 틈: LiDAR엔 벽이 가깝게 보임
+    run(r, d, 20, t0=t, hook=wall)
+    assert not [e for e in r.events if e[0] == EV_BLOCKED]   # quiet_to_next라 N4까지 안 멈춤
+    assert r.prec == ['D4:undock', 'P1:tape', 'P1:tape_exit']   # P1을 떠날 때 테이프 빼기 먼저
+    assert r.nav_calls and r.nav_calls[0] == (3.0, 2.6)
+    assert reached(r)[-1] == 'N4'
+
+
+def test_goal_node_no_precision_when_queue_end_is_not_goal():
+    # 서버가 lock 때문에 D1까지만 보냄 (도착지는 D2) -> D1에서 도킹하지 않고 CMD_DONE만
+    r, d = make(1.698, 2.600, -math.pi / 2, last_drive=FORWARD)
+    d.on_move(70, False, FORWARD, [('D1', 1.748, 1.525, -1.5708)], False, 'D2')
+    run(r, d, 15)
+    assert r.prec == [] and [n for t, n, _ in r.events if t == CMD_DONE] == ['D1']
+    assert d.leave_from == ''                         # 도킹 안 했으니 leave 준비도 없음
+
+
+def test_goal_node_precision_at_goal():
+    r, d = make(1.698, 2.600, -math.pi / 2, last_drive=FORWARD)
+    d.on_move(71, False, FORWARD, [('D1', 1.748, 1.525, -1.5708)], False, 'D1')
+    run(r, d, 15)
+    assert r.prec == ['D1:dock']
+
+
+def test_guide_goal_skips_precision_and_plays_arrive():
+    # 안내 도착지가 정밀 정차 노드여도 정밀 정차 없이 Nav2 위치로 서고 도착 효과
+    r, d = make(1.698, 2.600, -math.pi / 2, last_drive=FORWARD)
+    d.on_move(72, False, FORWARD, [('D1', 1.748, 1.525, -1.5708)], True, 'D1')
+    run(r, d, 15, hook=auto_ok(r, d))
+    assert r.prec == []
+    assert [g[0] for g in r.guides] == ['greet', 'arrive']
 
 
 if __name__ == '__main__':

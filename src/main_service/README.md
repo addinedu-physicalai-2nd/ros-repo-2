@@ -106,13 +106,24 @@ WebSocket: `/ws/store` (snapshot에 `tables`, 로봇 `charging` 포함), `/ws/cu
 
 로봇이 정밀 정차(마커 · 라인)를 못 하면 `CMD_DONE.reason`에 이유가 오고, 매장 화면에 경고만 뜬다 (작업은 이어 감).
 
-## 안내 손님 확인 (fleet_msgs v8 Move.guide)
+## 안내 손님 확인 (fleet_msgs v9 Move.guide / goal_node)
 
-서버는 안내 작업이 테이블로 갈 때 보내는 Move에 `guide`만 켠다 (`GUIDE_ON`, 테이블이 끝인 Move는 `GUIDE_END`).
-Move 로그에 `안내` / `안내 끝`으로 보인다. 인사 · 확인할 자리 · 도착 효과는 로봇이 정한다 (서버 설정 없음)
+서버는 모든 Move에 `goal_node`(최종 도착지)를 채우고, 안내 작업이면 `guide: true`를 켠다.
+Move 로그에 `안내`, `도착지 <노드>`로 보인다. 인사 · 확인할 자리 · 도착 효과는 로봇이 정한다
+- 안내 자리 `guide_spots`: 안내는 테이블 칸에 안 들어가고 가운데 노드에서 끝난다 (T3 안내 -> 도착지 N6, 마지막 방향은 T3 쪽)
 - 로봇이 `CMD_FAILED reason=guest_lost:...`를 보내면: 고장으로 안 보고, 남은 경로 · lock을 버리고(`TrafficManager::abandon`) 안내 FAILED -> 테이블 풀림 -> 로봇은 집으로
-- 서빙 · 도킹 · 복귀 Move는 늘 `GUIDE_OFF`
+- 서빙 · 도킹 · 복귀 Move는 늘 `guide: false`
 - 시뮬레이션: `SIM_GUEST_LOST=N3 main_service_sim ...` 이면 안내 중 N3에서 손님을 놓친 것으로
+
+## 테이블 반대 노드로 나가기 (`table_pass_through: true`)
+
+- 테이블로 들어갈 때 나갈 칸(들어온 노드 반대편)도 같이 잠근다. 다른 로봇이 쥐고 있으면 들어가지 않고 기다린다
+- 테이블에서 나갈 때 들어온 노드는 경로에서 뺀다 (T3에 N5로 들어오면 N6으로 나감)
+
+## 안내 로봇 수 · 만석
+
+- 입구 대기 `entrance_standby_quiet/busy: 1`: 평소 안내 1대, 나머지는 서빙
+- 만석 = 테이블 전부 OCCUPIED이고 기다리는 안내가 없을 때. 만석이면 입구 대기 0 -> 3대 모두 서빙, 테이블이 비면 다시 1대 안내
 
 ## 시험 설정 파일 (main_service_test.yaml)
 

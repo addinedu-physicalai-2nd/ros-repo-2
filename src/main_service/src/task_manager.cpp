@@ -471,7 +471,7 @@ TaskManager::Task* TaskManager::joinableTrip(const Task& t) {
 
 void TaskManager::dispatchServe() {
   // 만석이면 안내할 일이 없으니 로봇 전부 서빙, 아니면 max_active_serve 대까지
-  bool full = !tables_.empty() && freeTableCount() == 0;
+  bool full = fullHouse();
   int limit = full ? static_cast<int>(robots_.size()) : cfg_.max_active_serve;
 
   // 일을 줄 수 있는 로봇: 놀고 있거나, 도킹으로 돌아가는 중인데 배터리가 충분한 로봇 (이어받기)
@@ -562,6 +562,17 @@ void TaskManager::sendIdleRobotsHome() {
   }
 }
 
+// 만석 = 모든 테이블에 손님이 앉음 + 안내를 기다리는 손님 없음
+// (안내 중인 예약 테이블이나 기다리는 안내가 있으면 만석이 아니다. 만석으로 보면 입구 대기 0대가 되어 안내가 굶는다)
+bool TaskManager::fullHouse() const {
+  if (tables_.empty()) return false;
+  for (const auto& pair : tables_)
+    if (pair.second.state != TableState::OCCUPIED) return false;
+  for (const auto& pair : tasks_)
+    if (pair.second.kind == TaskKind::GUIDE && pair.second.stage == Stage::WAITING) return false;
+  return true;
+}
+
 int TaskManager::freeTableCount() const {
   int n = 0;
   for (const auto& pair : tables_) {
@@ -574,7 +585,7 @@ int TaskManager::freeTableCount() const {
 int TaskManager::entranceStandbyWanted() const {
   int busy = static_cast<int>(tables_.size()) - freeTableCount();
   int want = (busy >= cfg_.busy_tables) ? cfg_.entrance_standby_busy : cfg_.entrance_standby_quiet;
-  if (!tables_.empty() && freeTableCount() == 0) want = 0;
+  if (fullHouse()) want = 0;
   return std::min(want, static_cast<int>(cfg_.entrance_docks.size()));
 }
 
@@ -853,7 +864,14 @@ void TaskManager::goTo(Task& t, const std::string& node) {
   display(t.robot, stageText(t, t.stage), 0);  // 문구 먼저 (카운트다운 지움), 그다음 이동
   // 안내 손님과 같이 가는 길이면 Move.guide (인사 · 확인 · 도착 효과는 로봇이 알아서)
   bool guide = t.kind == TaskKind::GUIDE && t.stage == Stage::TO_TABLE;
-  if (!traffic_.setGoal(t.robot, node, guide)) {
+  std::string go = node, face;
+  if (guide && cfg_.guide_spots.count(t.table) && map_.node(cfg_.guide_spots.at(t.table))) {
+    // 안내는 테이블 칸에 안 들어가고 옆 노드(guide_spots)에서 테이블 쪽을 보고 선다 (서빙 라인트레이싱과 안 겹치게)
+    go = cfg_.guide_spots.at(t.table);
+    face = node;
+    t.goal_node = go;  // 도착 판정은 실제로 서는 노드로
+  }
+  if (!traffic_.setGoal(t.robot, go, guide, face)) {
     alert("ERROR", t.robot, "task " + std::to_string(t.id) + " 경로를 만들 수 없어요");
     enterStage(t, Stage::FAILED);
   }

@@ -59,13 +59,13 @@ nodes:
   - {id: P2, type: STOP, stop_kind: QUEUE, lock: true, x: 0.257, y: -0.597, yaw: 1.640, next: [P1]}   # 픽업 대기 (후진 중이라 앞은 아래)
   - {id: P1, type: STOP, stop_kind: PICKUP, lock: true, x: 0.265, y: -1.041, yaw: 0.069, next: [N4]}   # 픽업. 테이프로 뒤(바구니)를 주방 픽업대에 넣음 (tape). P1 -> N4 일방통행
 
-  # ---- 테이블 정차 (바구니 = 뒤가 테이블 쪽. 테이블이 정차점 위에 있어 앞은 아래 / 확인 필요) ----
-  - {id: T1, type: STOP, stop_kind: SERVE, table: T1, lock: true, x: 1.248, y: -0.919, yaw: 1.640, next: [N2, N3]}  # [추정]
-  - {id: T2, type: STOP, stop_kind: SERVE, table: T2, lock: true, x: 0.806, y: -0.949, yaw: 1.640, next: [N3, N4]}  # [추정]
-  - {id: T3, type: STOP, stop_kind: SERVE, table: T3, lock: true, x: 1.254, y: -0.521, yaw: 1.640, next: [N5, N6]}  # [추정]
-  - {id: T4, type: STOP, stop_kind: SERVE, table: T4, lock: true, x: 0.791, y: -0.529, yaw: 1.640, next: [N6, N7]}  # [추정]
-  - {id: T5, type: STOP, stop_kind: SERVE, table: T5, lock: true, x: 1.177, y: -0.049, yaw: 1.640, next: [N8, N9]}  # [추정]
-  - {id: T6, type: STOP, stop_kind: SERVE, table: T6, lock: true, x: 0.727, y: -0.079, yaw: 1.640, next: [N9, N10]}  # [추정]
+  # ---- 테이블 정차 (yaw 없음: 진행 방향 그대로 지나가며 서고 반대 노드로 나간다. 바구니를 테이블 좁은 쪽에 맞춤) ----
+  - {id: T1, type: STOP, stop_kind: SERVE, table: T1, lock: true, x: 1.248, y: -0.919, next: [N2, N3]}  # [추정]
+  - {id: T2, type: STOP, stop_kind: SERVE, table: T2, lock: true, x: 0.806, y: -0.949, next: [N3, N4]}  # [추정]
+  - {id: T3, type: STOP, stop_kind: SERVE, table: T3, lock: true, x: 1.254, y: -0.521, next: [N5, N6]}  # [추정]
+  - {id: T4, type: STOP, stop_kind: SERVE, table: T4, lock: true, x: 0.791, y: -0.529, next: [N6, N7]}  # [추정]
+  - {id: T5, type: STOP, stop_kind: SERVE, table: T5, lock: true, x: 1.177, y: -0.049, next: [N8, N9]}  # [추정]
+  - {id: T6, type: STOP, stop_kind: SERVE, table: T6, lock: true, x: 0.727, y: -0.079, next: [N9, N10]}  # [추정]
 
   # ---- 도킹 (후진 진입·전진 출차, 앞은 통로 쪽 = 왼쪽, 바구니는 벽 쪽) ----
   - {id: D1, type: STOP, stop_kind: DOCK, pocket: true, entry: REVERSE, lock: true, x: 1.721, y: 0.179, yaw: 0.069, next: [N1, D2]}   # [추정] 입구 통로 위 칸. D2로 가려면 D1 자리를 지나간다 (통로 폭이 로봇 한 대)

@@ -153,6 +153,7 @@ class TaskManager {
   bool tableBusy(const std::string& table) const;  // 그 테이블로 가는 중이거나 서 있는 로봇이 있나 (종류 상관없이)
   bool entranceOk(const std::string& robot_id);  // 배터리가 충분해서 입구 도킹에 세워도 되나 / 이어받기 가능
   int freeTableCount() const;
+  bool fullHouse() const;
   int entranceStandbyWanted() const;   // 입구에 세워 둘 로봇 수 (찬 테이블 수 기준)
   int entranceStandbyCount() const;    // 입구 도킹에 있거나 가는 중인 (충전 아닌) 로봇 수
   bool wantEntrance(const std::string& robot_id) const;  // 이 로봇을 입구 도킹으로 보낼까

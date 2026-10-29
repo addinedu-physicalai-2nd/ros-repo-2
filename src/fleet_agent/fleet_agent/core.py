@@ -21,8 +21,6 @@ IDLE, MOVING, PAUSED, BLOCKED, ERROR = 0, 1, 2, 3, 4
 NODE_REACHED, CMD_DONE, CMD_FAILED, EV_BLOCKED = 0, 1, 2, 4
 # Control.command
 PAUSE, RESUME, CANCEL = 0, 1, 2
-# Move.guide (fleet_msgs v8)
-GUIDE_OFF, GUIDE_ON, GUIDE_END = 0, 1, 2
 
 
 def wrap(a):
@@ -55,7 +53,8 @@ class Step:
     x: float
     y: float
     yaw: float
-    guide: int = GUIDE_OFF
+    guide: bool = False   # Move.guide (안내 중)
+    goal: str = ''        # Move.goal_node (최종 도착지, '' = 모름)
 
 
 class StepQueue:
@@ -65,7 +64,7 @@ class StepQueue:
         self.steps = []
         self.cmd_id = 0
 
-    def apply(self, cmd_id, append, drive, waypoints, guide=GUIDE_OFF):
+    def apply(self, cmd_id, append, drive, waypoints, guide=False, goal=''):
         if append:
             if cmd_id != self.cmd_id:
                 return False  # 다른 명령에 붙이려는 APPEND는 버린다
@@ -73,7 +72,7 @@ class StepQueue:
             self.steps.clear()
             self.cmd_id = cmd_id
         for w in waypoints:
-            self.steps.append(Step(cmd_id, drive, w[0], w[1], w[2], w[3], guide))
+            self.steps.append(Step(cmd_id, drive, w[0], w[1], w[2], w[3], bool(guide), goal or ''))
         return True
 
     def clear(self):
@@ -244,7 +243,9 @@ class Driver:
       - 같은 방향 APPEND는 멈추지 않고 이어서, drive가 바뀌면 그 노드에서 멈추고 제자리 회전 후 출발
       - FORWARD = Nav2, REVERSE = cmd_vel 직선 후진
       - 중간 노드는 위치만 통과, 줄 끝 노드에서만 yaw를 맞춘다
-      - 줄 끝 노드가 dock / tape 정밀 정차면 끝낸 뒤 CMD_DONE. align 노드는 지날 때마다 맞추고 이어 간다
+      - 도착지(Move.goal_node)가 dock / tape 정밀 정차면 끝낸 뒤 CMD_DONE. align 노드는 지날 때마다 맞추고 이어 간다
+        줄 끝이 도착지가 아니면(길이 막혀 서버가 거기까지만 보냄) 정밀 정차 없이 CMD_DONE하고 다음 Move를 기다린다
+        goal_node가 비어 있으면(예전 서버) 줄 끝을 도착지로 본다
       - leave (precision_stops의 노드.leave): 그 노드에서 CMD_DONE 한 뒤(또는 켤 때 서 있던 노드) 다음 출발 전에
         docking에 맡긴다. 예) D4 leave=undock: 마커로 N15까지 나와 돌고 정렬 -> to 노드(N15) 도착으로 침
                               P1 leave=tape_exit: 테이프 선까지 앞으로 빼고 -> 그다음 Nav2
@@ -252,11 +253,11 @@ class Driver:
                    방향은 odom으로 유지 (io.odom_yaw가 있으면). 맵(AMCL) 보정에 따라 꺾이지 않는다
       - 축 고정 후진으로 tape 노드(P1)에 갈 때는 좌표까지 가지 않고 tape에 바로 맡긴다 (tape_approach):
         tape가 바닥 가로선을 보며 후진해 멈추고 삽입까지 -> NODE_REACHED · CMD_DONE (좌표가 조금 틀려도 됨)
-    안내 (Move.guide != OFF): 서버는 "안내 중"만 알려 주고, 나머지는 로봇이 판단한다
+    안내 (Move.guide = true): 서버는 "안내 중"과 도착지만 알려 주고, 나머지는 로봇이 판단한다
       - 인사 : 안내가 아닌 상태에서 안내 Move를 처음 받으면, 떠나기 전에 Guide 'greet' (앞 카메라로 손님 기다림)
       - 확인 : 꺾이는 노드(들어온 방향과 나갈 방향이 check_turn 넘게 다름)에서 멈춤 -> 뒤로 돎 -> Guide 'watch'
                -> 다음 노드 쪽으로 돎 -> 이어 감. 바로 전 인사 · 확인 자리에서 check_gap m 안이면 건너뜀
-      - 도착 : GUIDE_END Move의 끝에서 CMD_DONE 뒤 Guide 'arrive' (도착 효과, 기다리지 않음)
+      - 도착 : 도착지(goal_node)에서 CMD_DONE 뒤 Guide 'arrive' (도착 효과, 기다리지 않음). 안내는 정밀 정차 안 함
       - 손님을 못 찾으면 그 자리에 멈추고 CMD_FAILED reason="guest_lost:<노드>:<이유>" (고장 아님, 줄 비움)
     """
 
@@ -307,21 +308,21 @@ class Driver:
         self.skip_turn = False        # 다음 방향 바뀜 회전 생략 (축을 이미 맞춤)
 
     # ------------------------------------------------------------ 입력
-    def on_move(self, cmd_id, append, drive, waypoints, guide=GUIDE_OFF):
+    def on_move(self, cmd_id, append, drive, waypoints, guide=False, goal=''):
         if not waypoints:
             return
-        if guide == GUIDE_OFF:
+        if not guide:
             self.in_guide = False     # 안내가 끝났다 (복귀 · 서빙)
         if not append:  # REPLACE: 지금 가던 것까지 버리고 새로
             if self.phase == 'leave' and self.leave_req:
                 self.leave_from = self.leave_req['node']   # 아직 못 떠났다 -> 새 명령 출발 때 다시
             self._stop_motion()
-            self.queue.apply(cmd_id, False, drive, waypoints, guide)
+            self.queue.apply(cmd_id, False, drive, waypoints, guide, goal)
             self.cur = None
             self.phase = 'idle'
             self.error = False
             return
-        if not self.queue.apply(cmd_id, True, drive, waypoints, guide):
+        if not self.queue.apply(cmd_id, True, drive, waypoints, guide, goal):
             self.io.log(f'다른 명령({cmd_id})에 붙이는 APPEND 무시 (지금 {self.queue.cmd_id})')
             return
         if self.phase == 'precision':
@@ -544,7 +545,8 @@ class Driver:
             self.io.nav_go(self.cur.x, self.cur.y, self.cur.yaw)
         else:
             stop = self.stops.get(self.cur.node_id, {})
-            if self.axis is not None and stop.get('method') == 'tape' and stop.get('approach', True):
+            if (self.axis is not None and stop.get('method') == 'tape' and stop.get('approach', True)
+                    and self._precise_here(self.cur)):
                 # 축 고정 후진으로 테이프 노드: 좌표 대신 바닥 가로선으로 멈추게 tape에 바로 맡김
                 self.io.cmd_vel(0.0, 0.0)  # 여기서부터 /cmd_vel은 docking(tape)이 씀
                 self.phase = 'tape_approach'
@@ -621,11 +623,21 @@ class Driver:
             self._done()
             return
         stop = self.stops.get(self.cur.node_id)
-        if stop and stop['method'] in ('dock', 'tape'):
+        if stop and stop['method'] in ('dock', 'tape') and self._precise_here(self.cur):
             self.phase = 'precision'
             self._request_precision(False)
             return
         self._done()
+
+    def _at_goal(self, step):
+        """이 노드가 이번 이동의 도착지인가 (Move.goal_node). 모르면(예전 서버) 줄 끝(뒤에 남은 노드 없음)이면 도착지"""
+        if step.goal:
+            return step.node_id == step.goal
+        return len(self.queue) == 0
+
+    def _precise_here(self, step):
+        """정밀 정차(dock · tape)를 할 곳인가: 도착지이고 안내가 아닐 때 (안내는 Nav2 위치 · yaw로만 섬)"""
+        return self._at_goal(step) and not step.guide
 
     def _request_precision(self, align):
         stop = dict(self.stops.get(self.cur.node_id, {}))
@@ -637,11 +649,11 @@ class Driver:
         # 정밀 정차를 못 했으면 이유를 reason에 (서버가 경고만 띄우고 작업은 이어 감)
         self.io.event(CMD_DONE, self.queue.cmd_id, self.cur.node_id, self.prec_detail)
         self.prec_detail = ''
-        if self.stops.get(self.cur.node_id, {}).get('leave'):
-            self.leave_from = self.cur.node_id   # 다음 출발 때 leave 먼저
+        if self.stops.get(self.cur.node_id, {}).get('leave') and self._precise_here(self.cur):
+            self.leave_from = self.cur.node_id   # 다음 출발 때 leave 먼저 (정밀 정차한 도착지에서만)
         self.phase = 'idle'
         self.io.direction('STOP')
-        if self.cur.guide == GUIDE_END:
+        if self.cur.guide and self._at_goal(self.cur):
             self.io.guide({'action': 'arrive', 'node': self.cur.node_id})  # 도착 효과 (기다리지 않음)
 
     def _odom_yaw(self):

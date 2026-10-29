@@ -35,6 +35,8 @@ bool loadConfig(const std::string& path, Config& cfg, std::string& error) {
     if (root["auto_ready"]) cfg.auto_ready = root["auto_ready"].as<bool>();
     if (root["max_active_serve"]) cfg.max_active_serve = root["max_active_serve"].as<int>();
     if (root["max_active_guide"]) cfg.max_active_guide = root["max_active_guide"].as<int>();
+    if (root["guide_spots"]) cfg.guide_spots = root["guide_spots"].as<std::map<std::string, std::string>>();
+    if (root["table_pass_through"]) cfg.table_pass_through = root["table_pass_through"].as<bool>();
     if (root["serve_batch_max"]) cfg.serve_batch_max = root["serve_batch_max"].as<int>();
     if (root["reassign_after_sec"]) cfg.reassign_after_sec = root["reassign_after_sec"].as<int>();
     if (root["entrance_docks"]) cfg.entrance_docks = root["entrance_docks"].as<std::vector<std::string>>();

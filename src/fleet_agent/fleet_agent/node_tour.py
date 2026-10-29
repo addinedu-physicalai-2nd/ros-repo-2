@@ -101,6 +101,7 @@ class Tour(Node):
         m.cmd_id = self.cmd_id
         m.mode = Move.REPLACE
         m.drive = Move.FORWARD
+        m.goal_node = nodes[-1]           # 이 다리의 끝 = 도착지 (정밀 정차 노드여도 거기서만)
         for i, nid in enumerate(nodes):
             n = self.g.nodes[nid]
             w = Waypoint()

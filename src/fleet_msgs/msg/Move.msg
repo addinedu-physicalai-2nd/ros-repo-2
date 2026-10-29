@@ -12,15 +12,17 @@ uint8 APPEND=1      # 기존 경로 뒤에 이어 붙임. 원래 명령과 같�
 uint8 FORWARD=0     # 전진 (앞이 진행 방향)
 uint8 REVERSE=1     # 후진 (뒤가 진행 방향)
 
-# guide (v8): 안내 손님과 같이 가는 Move인지. 서빙 · 도킹 · 복귀는 늘 OFF
-#   안내 중 로봇이 알아서: 출발 전 손님 기다림(인사), 꺾이는 노드에서 뒤돌아 확인, 목적지 도착 효과
+# goal_node (v9): 이번 이동의 최종 도착지 (서버가 정한 목적지. 예: P1, T3, D4, 안내면 N6)
+#   서버는 lock을 잡은 만큼씩 끊어 보내므로 waypoints 끝이 도착지가 아닐 수 있다 (길이 막혀 잠깐 섬)
+#   로봇은 도착지에서만 도착 동작(정밀 정차 dock · tape, 안내 도착 효과, leave 준비)을 하고, 나머지 노드는 지나간다
+# guide (v9): 안내 손님과 같이 가는 이동인지. 서빙 · 도킹 · 복귀는 false
+#   true면 로봇이 알아서: 출발 전 손님 기다림(인사), 꺾이는 노드에서 뒤돌아 확인, 도착지에서 도착 효과
+#   안내는 도착지에서 정밀 정차를 하지 않는다 (Nav2 위치 · 마지막 waypoint yaw 방향으로 섬)
 #   손님을 놓치면 그 자리에 멈추고 RobotEvent CMD_FAILED, reason = "guest_lost:<노드>:<이유>"
-uint8 GUIDE_OFF=0   # 일반 주행
-uint8 GUIDE_ON=1    # 안내 중
-uint8 GUIDE_END=2   # 안내 중 + 이 Move의 마지막 노드가 안내 목적지 (도착 효과)
 
 uint32 cmd_id       # 명령 번호 (서버가 1씩 증가)
 uint8 mode          # REPLACE / APPEND
 uint8 drive         # FORWARD / REVERSE
-uint8 guide         # GUIDE_OFF / GUIDE_ON / GUIDE_END
+string goal_node    # 최종 도착지 노드 ID ("" = 모름: 예전처럼 waypoints 끝을 도착지로 봄)
+bool guide          # 안내 중
 Waypoint[] waypoints  # 차례로 지나갈 노드

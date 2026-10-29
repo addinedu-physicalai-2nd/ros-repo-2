@@ -120,12 +120,13 @@ class FleetAgent(Node):
     # ================================================================ 서버 -> 로봇
     def on_move(self, msg):
         wps = [(w.node_id, w.x, w.y, w.yaw) for w in msg.waypoints]
-        guide = getattr(msg, 'guide', 0)
+        guide = bool(getattr(msg, 'guide', False))
+        goal = getattr(msg, 'goal_node', '')
         append = msg.mode == Move.APPEND
         self.get_logger().info(f'Move cmd {msg.cmd_id} {"APPEND" if append else "REPLACE"} '
-                               f'{"REVERSE" if msg.drive == Move.REVERSE else "FORWARD"}'
-                               f'{["", " 안내", " 안내 끝"][guide] if guide < 3 else ""} {[w[0] for w in wps]}')
-        self.driver.on_move(msg.cmd_id, append, msg.drive, wps, guide)
+                               f'{"REVERSE" if msg.drive == Move.REVERSE else "FORWARD"}{" 안내" if guide else ""} '
+                               f'{[w[0] for w in wps]} -> 도착지 {goal or "?"}')
+        self.driver.on_move(msg.cmd_id, append, msg.drive, wps, guide, goal)
 
     def on_control(self, msg):
         self.get_logger().info(f'Control {["PAUSE", "RESUME", "CANCEL"][msg.command] if msg.command < 3 else msg.command}')

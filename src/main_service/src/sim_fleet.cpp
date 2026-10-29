@@ -51,7 +51,7 @@ void SimFleet::sendMove(const std::string& robot_id, const MoveCmd& cmd) {
     b.cmd_id = cmd.cmd_id;
     b.dock_wait = 0.0;
   }
-  b.guide = cmd.guide != GUIDE_OFF;
+  b.guide = cmd.guide;
   for (const WaypointCmd& w : cmd.waypoints) b.path.push_back({w, rev});
   b.running = true;
 }

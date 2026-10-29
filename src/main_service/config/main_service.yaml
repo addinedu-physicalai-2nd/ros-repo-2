@@ -24,6 +24,8 @@ auto_ready: true                # true = 주문하면 바로 조리 완료 (주�
 depart_grace_sec: 2             # 카운트다운 0 이후 실제 출발까지
 max_active_serve: 2             # 빈 테이블이 있을 때 동시 서빙 최대 (만석이면 로봇 전부)
 max_active_guide: 1             # 동시 안내 최대
+guide_spots: {T1: N3, T2: N3, T3: N6, T4: N6, T5: N9, T6: N9}   # 안내는 테이블 칸에 안 들어가고 가운데 줄 노드에서 테이블 쪽을 보고 섬
+table_pass_through: true        # 서빙: 테이블은 지나가며 서고 반대 노드로 나감 (들어갈 때 나갈 칸까지 잡음)
 serve_batch_max: 3              # 같은 테이블 주문을 한 번에 싣는 최대 건수
 reassign_after_sec: 10          # 적재 전 로봇이 이만큼 고장 · 통신 끊김이면 다른 로봇에 다시 배정
 
@@ -32,8 +34,8 @@ entrance_docks: [D1, D2]        # 입구 쪽 (앞칸부터). 안내는 여기 �
 pickup_docks: [D3, D4]          # 픽업 쪽
 dock_via: {D2: D1}              # 뒤칸: 앞칸. D2(안쪽)는 D1이 비어 있어야 드나든다. 둘 다 비면 D2부터 채운다
 busy_tables: 4                  # 찬 테이블(사용 중 + 안내 중)이 이 수 이상이면 바쁨
-entrance_standby_quiet: 2       # 한가할 때 입구에 세워 둘 로봇 수
-entrance_standby_busy: 1        # 바쁠 때 입구에 세워 둘 로봇 수 (만석이면 0 = 전부 픽업 쪽)
+entrance_standby_quiet: 1       # 한가할 때 입구에 세워 둘 로봇 수 (안내 1대)
+entrance_standby_busy: 1        # 바쁠 때도 1대 (만석 = 모든 테이블 착석 + 안내 대기 없음 이면 0 = 3대 다 서빙)
 entrance_keep_penalty_m: 1.5    # 서빙 배정 때 입구 로봇에 더하는 비용 (만석이 아니면, 다른 로봇이 비슷한 거리면 그쪽에 서빙)
 
 # ---- 테이블 (id = node_graph의 table 값). 손님이 입구 키오스크 배치도에서 빈 테이블을 직접 고른다

@@ -53,8 +53,8 @@ class TrafficManager {
 
   // ---- 목적지
   bool setGoal(const std::string& id, const std::string& node);  // 경로가 없으면 false
-  // guide = 안내 손님과 같이 가는 길 (보내는 Move에 GUIDE_ON / 목적지 Move에 GUIDE_END)
-  bool setGoal(const std::string& id, const std::string& node, bool guide);
+  // guide = 안내 손님과 같이 가는 길 (Move.guide). face_node가 있으면 도착지에서 그 노드 쪽을 보고 선다 (안내: 테이블 쪽)
+  bool setGoal(const std::string& id, const std::string& node, bool guide, const std::string& face_node = "");
   // 로봇이 그 자리에 멈췄다 (안내 손님 놓침): 보낸 남은 칸을 버리고 lock을 푼다. 지금 노드 lock만 남김
   void abandon(const std::string& id);
   void clearGoal(const std::string& id);
@@ -102,9 +102,15 @@ class TrafficManager {
     Clock::time_point avoid_until;
     std::string via;               // 비켜 주기: 먼저 들를 옆 칸 ("" = 없음)
     bool guide = false;            // 안내 중인 목적지 (목적지가 바뀌면 지움)
+    std::string face_node;         // 도착지에서 이 노드 쪽을 보고 섬 ("" = 들어온 방향 / 노드 yaw)
+    std::string table_entry;       // 지금 서 있는 테이블 칸에 들어온 노드 (나갈 때 이 노드로는 안 감)
+    std::string reserved_exit;     // 테이블에 들어가며 미리 잡은 나갈 칸
   };
 
   std::string lastSent(const Robot& r) const;
+  std::set<std::string> baseBan(const Robot& r) const;  // 경로 계산에서 늘 빼는 노드 (우회 중 · 테이블 들어온 노드)
+  std::string tableExit(const Robot& r, const std::vector<std::string>& seg) const;  // 테이블로 들어가는 칸이면 나갈 칸
+  void dropReservedExit(Robot& r);
   bool tryExtend(Robot& r);
   std::vector<std::string> buildSegment(const Robot& r) const;
   std::vector<std::string> planPath(const Robot& r) const;

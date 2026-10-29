@@ -40,7 +40,8 @@ void FleetLinkManager::sendMove(const std::string& robot_id, const MoveCmd& cmd)
   msg.cmd_id = cmd.cmd_id;
   msg.mode = cmd.append ? fleet_msgs::msg::Move::APPEND : fleet_msgs::msg::Move::REPLACE;
   msg.drive = (cmd.drive == Drive::REVERSE) ? fleet_msgs::msg::Move::REVERSE : fleet_msgs::msg::Move::FORWARD;
-  msg.guide = cmd.guide;  // GUIDE_OFF / ON / END 값이 같다
+  msg.guide = cmd.guide;
+  msg.goal_node = cmd.goal_node;
   for (const WaypointCmd& w : cmd.waypoints) {
     fleet_msgs::msg::Waypoint wp;
     wp.node_id = w.node_id;
