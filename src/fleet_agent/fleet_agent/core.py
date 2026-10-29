@@ -40,7 +40,7 @@ def load_precision_stops(path):
         data = yaml.safe_load(f) or {}
     out = {}
     for node, cfg in data.items():
-        if isinstance(cfg, dict) and cfg.get('method') in ('dock', 'align', 'tape', 'dock_in'):
+        if isinstance(cfg, dict) and cfg.get('method') in ('dock', 'align', 'tape', 'dock_in','table'):
             out[str(node)] = dict(cfg)
     return out
 
@@ -63,6 +63,7 @@ class StepQueue:
     def __init__(self):
         self.steps = []
         self.cmd_id = 0
+        self.table_req = None
 
     def apply(self, cmd_id, append, drive, waypoints, guide=False, goal=''):
         if append:
@@ -366,7 +367,7 @@ class Driver:
             self.nav_state = 'ok' if ok else 'fail'
 
     def on_precision_result(self, ok, detail=''):
-        if self.phase in ('align', 'precision', 'leave', 'tape_approach', 'corridor_approach') \
+        if self.phase in ('align', 'precision', 'leave', 'tape_approach', 'corridor_approach','table_approach') \
                 and self.prec_state == 'running':
             self.prec_state = 'ok'
             self.prec_ok = ok
@@ -508,10 +509,11 @@ class Driver:
                 self._finish(pose)
 
     # ------------------------------------------------------------ 내부
+    
     def _tick_nav(self, pose):
         d = math.hypot(self.cur.x - pose[0], self.cur.y - pose[1])
         nxt = self.queue.steps[0] if len(self.queue) else None
-        if nxt and nxt.drive == FORWARD and d < self.pass_tol and not self._is_check(self.cur, nxt):
+        if nxt and nxt.drive == FORWARD and d < self.pass_tol and not self._is_check(self.cur, nxt) and not self._table_next(nxt):
             self._reached(pose)  # 중간 노드: 위치만 통과, 다음 목표로 바로 (손님 확인 노드는 끝까지 가서 선다)
             return
         if self.nav_state == 'ok':
@@ -540,6 +542,8 @@ class Driver:
             self._guide_request('greet', self.last_node or self.cur.node_id, self._depart)
             return
         self._depart(pose)
+
+    
 
     def _depart(self, pose):
         leave = self.stops.get(self.leave_from, {}).get('leave') if self.leave_from else None
@@ -570,6 +574,18 @@ class Driver:
             self.axis = None
             self.axis_odom = None
             self.skip_turn = False
+            # ↓↓↓ 추가: 테이블 도착지면 Nav2로 T 좌표까지 가지 않고, 지금 자리(직전 노드)에서 docking에 맡김
+            stop = self.stops.get(self.cur.node_id, {})
+            if (stop.get('method') == 'table' and self._precise_here(self.cur)
+                    and self.last_node in stop.get('from', {})):
+                self.io.cmd_vel(0.0, 0.0)   # 여기서부터 /cmd_vel은 docking(table)이 씀
+                self.table_req = dict(stop, node=self.cur.node_id, from_node=self.last_node)
+                self.phase = 'table_approach'
+                self.prec_state = 'running'
+                self.io.direction('STOP')   # 테이블 옆이라 LiDAR 장애물 판단 끔
+                self.io.precision(dict(self.table_req))
+                return
+            # ↑↑↑ 추가 끝
             self.phase = 'nav'  # nav_go 결과가 바로 와도 받을 수 있게 먼저
             self.nav_state = 'running'
             self.nav_tries = 0
@@ -602,6 +618,9 @@ class Driver:
         elif self.phase == 'tape_approach':
             self.prec_state = 'running'
             self.io.precision(dict(self.stops.get(self.cur.node_id, {}), node=self.cur.node_id, approach=True))
+        elif self.phase == 'table_approach' and self.table_req:   # ← 추가 (테이블)
+            self.prec_state = 'running'
+            self.io.precision(dict(self.table_req))    
         elif self.phase == 'corridor_approach' and self.handover_req:
             # 멈췄던 자리에서 남은 거리를 다시 재서 맡김
             self.prec_state = 'running'
@@ -677,6 +696,12 @@ class Driver:
     def _precise_here(self, step):
         """정밀 정차(dock · tape)를 할 곳인가: 도착지이고 안내가 아닐 때 (안내는 Nav2 위치 · yaw로만 섬)"""
         return self._at_goal(step) and not step.guide
+
+    def _table_next(self, nxt):
+        """다음 step이 정밀 정차할 테이블(도착지)인가 -> 그 앞 노드는 통과하지 말고 끝까지 가서 선다"""
+        return (nxt is not None and nxt.drive == FORWARD and not nxt.guide
+                and self.stops.get(nxt.node_id, {}).get('method') == 'table'
+                and nxt.goal == nxt.node_id)
 
     def _request_precision(self, align):
         stop = dict(self.stops.get(self.cur.node_id, {}))
@@ -808,7 +833,7 @@ class Driver:
     def _stop_motion(self, keep=False, keep_dir=False):
         self.io.cmd_vel(0.0, 0.0)
         self.io.nav_cancel()
-        if self.phase in ('align', 'precision', 'leave', 'tape_approach', 'corridor_approach'):
+        if self.phase in ('align', 'precision', 'leave', 'tape_approach', 'corridor_approach','table_approach'):
             self.io.precision_cancel()
         if self.phase in ('guide_greet', 'guide_watch'):
             self.io.guide_cancel()

@@ -50,9 +50,37 @@ P1:  {method: tape, x_after: 0.035, timeout: 60,          # 바구니(뒤)를 �
       leave: {method: tape_exit, exit_legs: 2, quiet_to_next: true}}  # 받은 뒤 새 선까지 빼고 Nav2 (N4)
 
 # 테이블 정차: 테이프로 정밀하게 넣을 예정 (잠정. 방식이 정해지면 수정)
-T1:  {method: tape}
-T2:  {method: tape}
-T3:  {method: tape}
-T4:  {method: tape}
-T5:  {method: tape}
-T6:  {method: tape}
+# 테이블: 직전 노드(from)에서 Nav2로 서고(들어가는 방향 yaw) -> docking table:
+#   face_deg만큼 돌아 다리 마커 찾기 · 측정 -> 차선 올라타기 -> 정렬 시작부터 lines번째 선에서 정지
+#   기록 = ~/dock_target_<target>.json (table_align.py --record-lane, 팀 dock_target 형식)
+#   leave table_exit: 서빙 뒤 지금 방향으로 dist만큼 전진 -> 그다음 Nav2 (costmap 경계 벗어나기)
+T1: {method: table, lines: 2, timeout: 60,
+     from: {N2: {marker: 11, target: t1l},
+            N3: {marker: 12, target: t1r},
+     leave: {method: table_exit, dist: 0.1}}
+
+T2: {method: table, lines: 2, timeout: 60,
+     from: {N3: {marker: 21, target: t2l},
+            N4: {marker: 22, target: t2r}},
+     leave: {method: table_exit, dist: 0.1}}
+
+# T3 (N5 · N6), T4 (N6 · N7), T5 (N8 · N9), T6 (N9 · N10) 같은 식
+T3:  {method: table, lines: 2, timeout: 60,
+     from: {N5: {marker: 31, target: t3l},
+            N6: {marker: 32, target: t3r}},
+     leave: {method: table_exit, dist: 0.1}}
+
+T4:  {method: table, lines: 2, timeout: 60,
+     from: {N6: {marker: 41, target: t4l},
+            N7: {marker: 42, target: t4r}},
+     leave: {method: table_exit, dist: 0.1}}
+
+T5:  {method: tabale, lines: 2, timeout: 60,
+     from: {N8: {marker: 51, target: t5l},
+            N9: {marker: 52, trget: t5r}},
+     leave: {method: table_exit, dist: 0.1}}
+
+T6:  {method: tabale, lines: 2, timeout: 60,
+     from: {N9: {marker: 61, target: t6l},
+            N10: {marker: 62, trget: t6r}},
+     leave: {method: table_exit, dist: 0.1}}
