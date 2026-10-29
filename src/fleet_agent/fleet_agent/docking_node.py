@@ -16,6 +16,8 @@ fleet_agent <-> docking 인터페이스 (std_msgs/String, JSON)
   corridor: corridor.follow_walls   축 고정 후진을 벽 평행으로, travel만큼 (중간 노드까지)
   (leave = 노드를 떠날 때, precision_stops의 <노드>.leave)
   undock    : docking/undock.py   마커로 나올 자리까지 + 회전 + 방위각 정렬                  (D3/D4 -> N16/N15)
+  table     : docking/table_dock.py TableDocker.run   다리 마커로 차선 정렬 -> 바닥 정지선            (T1~T6)
+  table_exit: docking/table_dock.py TableDocker.leave 서빙 뒤 dist만큼 전진 (그다음 Nav2)
   tape_exit : docking/line_dock.py LineDocker.leave  앞으로 빼서 새 선에서 정지              (P1 -> 그다음 Nav2)
   마커 목표 파일은 혼자 실행으로 미리 저장: ros2 run fleet_agent marker_dock --record --id <마커>
   통로 · 도크 기록은 ros2 run fleet_agent dock_record all (docking/dock_record.py)
@@ -40,6 +42,7 @@ from .docking import marker_dock as md
 from .docking.corridor import FOLLOW_STOP_EARLY, Lidar, Steps, _load
 from .docking.line_dock import DEFAULTS, LineDocker, Motion
 from .docking.undock import undock
+from .docking.table_dock import TableDocker
 
 
 class DockingNode(Node):
@@ -123,6 +126,10 @@ class DockingNode(Node):
                 result = LineDocker(self, self.cmd_pub, self.cancelled, self.tf_buf, self.ir).leave(req)
             elif method == 'undock':
                 result = self.run_undock(req)
+            elif method == 'table':
+                result = self.run_table(req)
+            elif method == 'table_exit':
+                result = TableDocker(self, self.cmd_pub, self.cancelled, self.tf_buf, None, self.ir).leave(req)
             else:
                 result = f'실패: 모르는 method {method}'
         except md.Cancelled:
@@ -162,6 +169,14 @@ class DockingNode(Node):
             left = dk.back_off(back)
             md.log(f'[후진] {back * 100:.1f} cm (남은 {left * 1000:+.1f} mm)')
         return result
+
+    def run_table(self, req):
+        """테이블: 들어온 노드(from_node)의 마커로 차선 정렬 -> 바닥 정지선 (docking/table_dock.py)"""
+        f = (req.get('from') or {}).get(req.get('from_node'))
+        if f is None:
+            return f'실패: {req.get("node")} from에 {req.get("from_node")} 없음'
+        cam = self.docker(int(f['marker']), f'{req.get("node")}_table').cam
+        return TableDocker(self, self.cmd_pub, self.cancelled, self.tf_buf, cam, self.ir).run(req)
 
     def run_undock(self, req):
         dk = self.docker(int(req['marker']), f'{req.get("node")}_undock')

@@ -63,7 +63,6 @@ class StepQueue:
     def __init__(self):
         self.steps = []
         self.cmd_id = 0
-        self.table_req = None
 
     def apply(self, cmd_id, append, drive, waypoints, guide=False, goal=''):
         if append:
@@ -311,6 +310,7 @@ class Driver:
         self.axis = None              # 축 고정 후진 방향 (leave hold_axis로 정함, FORWARD 출발 때 해제)
         self.axis_odom = None         # 같은 축을 odom yaw로 (방향 유지는 이것으로)
         self.prec_done_node = ''      # tape_approach로 정밀 정차를 이미 끝낸 노드
+        self.table_req = None         # table_approach 요청 (from_node 포함, 이어 하기 때 그대로 다시 보냄)
         self.quiet_obstacle = False   # leave quiet_to_next: 다음 노드 도착까지 LiDAR 장애물 판단 안 함 (좁은 틈 통과)
         self.skip_turn = False        # 다음 방향 바뀜 회전 생략 (축을 이미 맞춤)
         self.corridor = corridor      # 축 고정 후진을 docking(라이다 벽 따라가기)에 맡김
@@ -488,6 +488,12 @@ class Driver:
             if self.prec_state == 'ok':
                 self.prec_state = ''
                 self.prec_done_node = self.cur.node_id
+                self._reached(pose)
+        elif self.phase == 'table_approach':
+            if self.prec_state == 'ok':
+                self.prec_state = ''
+                self.prec_done_node = self.cur.node_id   # 정렬 · 정지선까지 끝 = T 도착
+                self.table_req = None
                 self._reached(pose)
         elif self.phase == 'corridor_approach':
             if self.prec_state == 'ok':

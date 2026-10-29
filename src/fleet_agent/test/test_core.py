@@ -558,6 +558,45 @@ def test_corridor_old_n14_align_keeps_turn():
     assert r.prec == ['N14:align'] and 'REVERSE' in r.dirs
 
 
+def test_table_from_node_then_table_exit():
+    # T1 도착지: N2에서 통과하지 않고 Nav2로 끝까지 서고 -> docking table (from_node=N2) -> CMD_DONE(T1)
+    # 다음 Move: table_exit 먼저 -> 그다음 Nav2로 N3
+    stops = dict(STOPS)
+    stops['T1'] = {'method': 'table', 'lines': 2,
+                   'from': {'N2': {'marker': 11, 'target': 't1l'}, 'N3': {'marker': 12, 'target': 't1r'}},
+                   'leave': {'method': 'table_exit', 'dist': 0.05}}
+    r = FakeRobot(1.5, -0.5, -math.pi / 2)
+    d = Driver(r, stops, reverse=ReverseControl(speed=0.1), policy=BlockPolicy())
+    r.driver = d
+    d.last_drive = FORWARD
+    navs, reqs = [], []
+    nav_go, precision = r.nav_go, r.precision
+    r.nav_go = lambda x, y, yaw: (navs.append((x, y)), nav_go(x, y, yaw))
+    r.precision = lambda req: (reqs.append(dict(req)), precision(req))
+    d.on_move(5, False, FORWARD, [('N2', 1.479, -0.936, 3.07), ('T1', 1.248, -0.919, 3.07)], False, 'T1')
+    t = run(r, d, 20)
+    assert navs == [(1.479, -0.936)]                     # T1 좌표로는 Nav2 안 감
+    assert r.prec == ['T1:table'] and reqs[0]['from_node'] == 'N2'
+    assert reached(r) == ['N2', 'T1']
+    assert [n for tt, n, _ in r.events if tt == CMD_DONE] == ['T1']
+    d.on_move(6, False, FORWARD, [('N3', 1.018, -0.903, 3.07)], False, 'N3')
+    run(r, d, 20, t0=t)
+    assert r.prec == ['T1:table', 'T1:table_exit']       # 떠날 때 빼기 먼저
+    assert navs[-1] == (1.018, -0.903) and reached(r)[-1] == 'N3'
+
+
+def test_table_pass_through_when_not_goal():
+    # T1이 도착지가 아니면(지나가기만) N2에서 멈추지 않고 table도 안 함
+    stops = dict(STOPS)
+    stops['T1'] = {'method': 'table', 'from': {'N2': {'marker': 11, 'target': 't1l'}}}
+    r, d = make(1.5, -0.5, -math.pi / 2, last_drive=FORWARD)
+    d.stops = stops
+    d.on_move(7, False, FORWARD, [('N2', 1.479, -0.936, 3.07), ('T1', 1.248, -0.919, 3.07),
+                                 ('N3', 1.018, -0.903, 3.07)], False, 'N3')
+    run(r, d, 25)
+    assert r.prec == [] and reached(r) == ['N2', 'T1', 'N3']
+
+
 if __name__ == '__main__':
     for name, fn in list(globals().items()):
         if name.startswith('test_'):
