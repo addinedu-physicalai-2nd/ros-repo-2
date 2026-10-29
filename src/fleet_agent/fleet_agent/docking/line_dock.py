@@ -26,7 +26,7 @@ import time
 from .marker_dock import Cancelled, Docker, clamp, wrap
 
 DEFAULTS = {
-    'ir_black': 2000,        # 이보다 크면 검정
+    'ir_black': 3000,        # 이보다 크면 검정
     'confirm': 2,            # 새 센서 값이 연속 이만큼 맞아야 인정
     'search_max': 0.30,      # P1 좌표에 선 뒤 가로선 찾을 최대 후진 (축 고정이 아닐 때)
     'approach_max': 1.20,    # 축 고정 후진으로 바로 맡았을 때(P2 -> 가로선) 최대 후진. 못 찾으면 정지
