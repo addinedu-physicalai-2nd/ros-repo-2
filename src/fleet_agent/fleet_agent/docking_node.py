@@ -1,21 +1,27 @@
 """Docking 노드: fleet_agent가 맡긴 정밀 정차를 한다
 
 fleet_agent <-> docking 인터페이스 (std_msgs/String, JSON)
-  /docking/request  {"id", "node", "method": "dock" | "align" | "tape", ...precision_stops.yaml 값 (marker, markers, back)}
+  /docking/request  {"id", "node", "method": "dock" | "align" | "tape" | "dock_in" | "corridor", ...precision_stops.yaml 값}
+                    fleet_agent가 붙이는 값: corridor(통로 넘겨받기) · travel(축 따라 남은 거리 m) · from_node
   /docking/result   {"id", "node", "ok": bool, "detail": str}
   /docking/cancel   {"id"}   -> 바로 멈추고 결과는 보내지 않는다
 
 방법 -> 구현
   dock  : docking/marker_dock.py  Docker.dock(마커 marker의 목표 파일) -> back(m)만큼 후진   (D1~D4)
-  align : 같은 Docker로 markers를 차례로 (안 보이면 돌며 찾기)                              (N14: 5 -> 6)
+  align : front/axis가 있으면 docking/corridor.py Steps.n14_align                             (N14: 마커 4 -> 우90 -> 5)
+          없으면 예전 방식 (markers를 Docker.dock으로 차례로)
   tape  : docking/line_dock.py    LineDocker.run  E자 테이프로 바구니를 픽업대에              (P1)
+          corridor=True면 먼저 corridor.follow_walls로 가로선 앞까지 (라이다 벽과 평행하게 후진)
+  dock_in : corridor.Steps.dock_in  통로(벽 평행) -> N15 -> 우90 -> 마커로 후면 주차         (통로 쪽 도크)
+  corridor: corridor.follow_walls   축 고정 후진을 벽 평행으로, travel만큼 (중간 노드까지)
   (leave = 노드를 떠날 때, precision_stops의 <노드>.leave)
   undock    : docking/undock.py   마커로 나올 자리까지 + 회전 + 방위각 정렬                  (D3/D4 -> N16/N15)
   tape_exit : docking/line_dock.py LineDocker.leave  앞으로 빼서 새 선에서 정지              (P1 -> 그다음 Nav2)
   마커 목표 파일은 혼자 실행으로 미리 저장: ros2 run fleet_agent marker_dock --record --id <마커>
+  통로 · 도크 기록은 ros2 run fleet_agent dock_record all (docking/dock_record.py)
 
 - 정밀 정차는 시간이 걸리고 멈춰서 재는 동작이라 따로 스레드에서 돈다 (TF는 노드 executor가 받음)
-- timeout_sec 안에 못 끝내면 멈추고 ok=True, detail="timeout"으로 끝낸다 (Nav2 위치 인정)
+- timeout_sec (요청에 timeout이 있으면 그 값) 안에 못 끝내면 멈추고 ok=True, detail="timeout"으로 끝낸다 (Nav2 위치 인정)
 - 일하는 동안만 /cmd_vel을 쓴다 (fleet_agent는 그동안 멈춰 있음)
 """
 import json
@@ -31,7 +37,8 @@ from std_msgs.msg import String, UInt16MultiArray
 from tf2_ros import Buffer, TransformListener
 
 from .docking import marker_dock as md
-from .docking.line_dock import LineDocker
+from .docking.corridor import FOLLOW_STOP_EARLY, Lidar, Steps, _load
+from .docking.line_dock import DEFAULTS, LineDocker, Motion
 from .docking.undock import undock
 
 
@@ -49,6 +56,7 @@ class DockingNode(Node):
         self.ir = {'v': None, 'n': 0}      # 바닥 센서 (tape · tape_exit)
         self.create_subscription(UInt16MultiArray, self.declare_parameter('ir_topic', '/ir_sensor/range').value,
                                  self.on_ir, 10)
+        self.lidar = Lidar(self, self.tf_buf)      # 통로 벽 (corridor · tape corridor · dock_in)
 
         self.cam = None            # 처음 마커 도킹 때 열고 계속 씀
         self.job = None            # 지금 요청
@@ -88,10 +96,11 @@ class DockingNode(Node):
 
     def watchdog(self):
         with self.lock:
-            if self.job is not None and not self.cancel_flag and time.monotonic() - self.job_start > self.timeout:
+            limit = float(self.job.get('timeout', self.timeout)) if self.job is not None else self.timeout
+            if self.job is not None and not self.cancel_flag and time.monotonic() - self.job_start > limit:
                 self.timed_out = True
                 self.cancel_flag = True
-                self.get_logger().warn(f'{self.job.get("node")} {self.timeout:.0f}초 넘김 -> 멈추고 Nav2 위치 인정')
+                self.get_logger().warn(f'{self.job.get("node")} {limit:.0f}초 넘김 -> 멈추고 Nav2 위치 인정')
 
     def cancelled(self):
         return self.cancel_flag
@@ -105,7 +114,11 @@ class DockingNode(Node):
             elif method == 'align':
                 result = self.run_align(req)
             elif method == 'tape':
-                result = LineDocker(self, self.cmd_pub, self.cancelled, self.tf_buf, self.ir).run(req)
+                result = self.run_tape(req)
+            elif method == 'dock_in':
+                result = self.run_dock_in(req)
+            elif method == 'corridor':
+                result = self.run_corridor(req)
             elif method == 'tape_exit':
                 result = LineDocker(self, self.cmd_pub, self.cancelled, self.tf_buf, self.ir).leave(req)
             elif method == 'undock':
@@ -154,7 +167,40 @@ class DockingNode(Node):
         dk = self.docker(int(req['marker']), f'{req.get("node")}_undock')
         return undock(self, self.cmd_pub, self.cancelled, self.tf_buf, dk.cam, req)
 
+    def steps(self, marker, tag):
+        """corridor.Steps (마커 + 라이다 + 바닥 센서). marker가 None이면 카메라 없이 (벽 따라가기만)"""
+        if marker is None:
+            md.open_log(tag)
+            cam = None
+        else:
+            cam = self.docker(int(marker), tag).cam
+        mv = Motion(self, self.cmd_pub, self.cancelled, self.tf_buf, self.ir, dict(DEFAULTS))
+        mv.dk.wait_pose()
+        return Steps(mv, cam, md.log, self.lidar)
+
+    def run_corridor(self, req):
+        st = self.steps(None, f'{req.get("node")}_corridor')
+        st.follow_walls(float(req.get('travel', 0.0)), f'통로 -> {req.get("node")}', stop_early=0.0, stop_on_bar=False)
+        return '성공'
+
+    def run_tape(self, req):
+        if req.get('corridor') and float(req.get('travel', 0.0)) > FOLLOW_STOP_EARLY:
+            st = self.steps(None, f'{req.get("node")}_corridor')
+            st.follow_walls(float(req['travel']), f'통로 -> {req.get("node")}')   # 가로선 앞 (또는 가로선)까지
+            req = dict(req, approach=True, approach_max=float(req.get('approach_max', 0.8)))
+        return LineDocker(self, self.cmd_pub, self.cancelled, self.tf_buf, self.ir).run(req)
+
+    def run_dock_in(self, req):
+        st = self.steps(int(req['marker']), f'{req.get("node")}_dock_in')
+        st.dock_in(req, travel=float(req.get('travel', 0.0)) if req.get('corridor') else 0.0)
+        return '성공'
+
     def run_align(self, req):
+        if 'front' in req:                 # 새 N14 정렬: 마커 4 -> 우90 -> 마커 5 (corridor.Steps.n14_align)
+            st = self.steps(_load(f'~/align_{req["front"]}.json')['id'], f'{req.get("node")}_align')
+            st.n14_align(_load(f'~/align_{req["front"]}.json'), _load(f'~/align_{req["axis"]}.json'),
+                         float(req.get('turn_deg', -90.0)))
+            return '성공'
         result = '실패: markers 없음'
         for marker in req.get('markers', []):
             dk = self.docker(int(marker), f'{req.get("node")}_align{marker}')

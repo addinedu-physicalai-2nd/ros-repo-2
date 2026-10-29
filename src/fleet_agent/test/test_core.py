@@ -452,6 +452,112 @@ def test_guide_goal_skips_precision_and_plays_arrive():
     assert [g[0] for g in r.guides] == ['greet', 'arrive']
 
 
+# ---------------------------------------------------------------- 통로 넘겨받기 (corridor_approach)
+CORR_STOPS = dict(STOPS)
+CORR_STOPS['N14'] = {'method': 'align', 'front': 'n14e', 'axis': 'n14s', 'hold_axis': True}
+CORR_STOPS['D4'] = {'method': 'dock_in', 'marker': 3, 'stop': 'n15', 'target': 'd3', 'via': 'n15s',
+                    'leave': {'method': 'undock', 'to': 'N15', 'hold_axis': True}}
+CORR_STOPS['P1'] = {'method': 'tape', 'leave': {'method': 'tape_exit', 'quiet_to_next': True}}
+NODES = {'N13': (3.023, 1.200), 'N14': (3.398, 1.200), 'N15': (3.398, 1.550), 'N16': (3.398, 1.750),
+         'P2': (3.398, 2.100), 'P1': (3.398, 2.600), 'D4': (3.548, 1.550)}
+
+
+class CorridorRobot(FakeRobot):
+    """docking 흉내: align은 남쪽(축)을 보게 살짝 틀어 두고, corridor / tape / dock_in은 그 노드로 옮겨 놓는다"""
+
+    def __init__(self, *a):
+        super().__init__(*a)
+        self.reqs = []
+        self.teleport = None
+
+    def precision(self, req):
+        super().precision(req)
+        self.reqs.append(dict(req))
+        m, n = req['method'], req['node']
+        if m == 'align':
+            self.teleport = (self.x, self.y, -math.pi / 2 + 0.06)        # 마커로 맞춘 축 (지도와 3.4° 다름)
+        elif m in ('corridor', 'dock_in'):
+            self.teleport = NODES[n] + (self.yaw,)
+        elif m == 'tape' and req.get('corridor'):
+            self.teleport = (3.398, 2.640, self.yaw)
+
+    def step(self, dt):
+        if self.prec_pending and self.prec_wait <= 0 and self.teleport:
+            self.x, self.y, self.yaw = self.teleport
+            self.teleport = None
+        super().step(dt)
+
+
+def corr_make():
+    r = CorridorRobot(*NODES['N13'], 0.0)
+    d = Driver(r, CORR_STOPS, reverse=ReverseControl(speed=0.1), policy=BlockPolicy())
+    d.last_drive = FORWARD
+    r.driver = d
+    return r, d
+
+
+def wp(*names, yaw=-1.5708):
+    return [(n,) + NODES[n] + (yaw,) for n in names]
+
+
+def test_corridor_n13_to_p1_handover_after_n14_align():
+    # N13 -> N14 (Nav2) 정렬 -> 축 그대로, 통로 전체(N15 N16 P2 P1)를 docking에 맡김 (벽 따라 후진 + tape)
+    r, d = corr_make()
+    d.on_move(80, False, FORWARD, wp('N14', yaw=0.0), False, 'P1')
+    d.on_move(80, True, REVERSE, wp('N15', 'N16', 'P2', 'P1'), False, 'P1')
+    run(r, d, 40)
+    assert r.prec == ['N14:align', 'P1:tape']
+    req = r.reqs[1]
+    assert req['corridor'] and req['approach'] and req['from_node'] == 'N14'
+    assert abs(req['travel'] - 1.40) < 0.05              # N14 -> P1 축 따라 (지도)
+    assert reached(r) == ['N14', 'N15', 'N16', 'P2', 'P1']
+    assert [n for t, n, _ in r.events if t == CMD_DONE] == ['P1']
+    assert abs(wrap(r.yaw - (-math.pi / 2 + 0.06))) < 0.02   # N14에서 맞춘 축: 출발 회전 · P1 yaw 회전 안 함
+    assert 'REVERSE' not in r.dirs                       # 후진은 docking이 함 (cmd_vel 후진 안 씀)
+    assert d.leave_from == 'P1'
+
+
+def test_corridor_n13_to_d4_dock_in():
+    r, d = corr_make()
+    d.on_move(81, False, FORWARD, wp('N14', yaw=0.0), False, 'D4')
+    d.on_move(81, True, REVERSE, wp('N15') + wp('D4', yaw=3.1416), False, 'D4')
+    run(r, d, 40)
+    assert r.prec == ['N14:align', 'D4:dock_in']
+    req = r.reqs[1]
+    assert req['corridor'] and req['marker'] == 3 and req['stop'] == 'n15' and req['target'] == 'd3'
+    assert abs(req['travel'] - 0.35) < 0.05              # 옆으로 비킨 도크는 그 줄(N15)까지
+    assert reached(r) == ['N14', 'N15', 'D4']
+    assert [n for t, n, _ in r.events if t == CMD_DONE] == ['D4']
+    assert d.leave_from == 'D4'
+
+
+def test_corridor_partial_path_then_append():
+    # lock 때문에 서버가 N16까지만 보냄 (도착지 P1) -> N16까지 벽 따라가기(corridor)만, CMD_DONE
+    # -> 다음 Move(P2 P1)는 N16에서 이어서 tape까지 맡김
+    r, d = corr_make()
+    d.on_move(82, False, FORWARD, wp('N14', yaw=0.0), False, 'P1')
+    d.on_move(82, True, REVERSE, wp('N15', 'N16'), False, 'P1')
+    t = run(r, d, 30)
+    assert r.prec == ['N14:align', 'N16:corridor']
+    assert reached(r) == ['N14', 'N15', 'N16']
+    assert [n for tt, n, _ in r.events if tt == CMD_DONE] == ['N16']
+    d.on_move(83, False, REVERSE, wp('P2', 'P1'), False, 'P1')
+    run(r, d, 30, t0=t)
+    assert r.prec == ['N14:align', 'N16:corridor', 'P1:tape']
+    assert r.reqs[-1]['from_node'] == 'N16' and abs(r.reqs[-1]['travel'] - 0.85) < 0.05
+    assert reached(r) == ['N14', 'N15', 'N16', 'P2', 'P1']
+    assert [n for tt, n, _ in r.events if tt == CMD_DONE] == ['N16', 'P1']
+
+
+def test_corridor_old_n14_align_keeps_turn():
+    # 예전 N14 설정 (hold_axis 없음): 정렬 뒤 축 없이 예전처럼 돌고 cmd_vel 후진
+    r, d = make(3.023, 1.200, 0.0, last_drive=FORWARD)
+    d.on_move(84, False, FORWARD, [('N14', 3.398, 1.200, -1.5708)])
+    d.on_move(84, True, REVERSE, [('N15', 3.398, 1.550, -1.5708)])
+    run(r, d, 20)
+    assert r.prec == ['N14:align'] and 'REVERSE' in r.dirs
+
+
 if __name__ == '__main__':
     for name, fn in list(globals().items()):
         if name.startswith('test_'):

@@ -21,10 +21,12 @@
 | `fleet_agent/agent_node.py` | `fleet_agent` | fleet 토픽 · Nav2 액션 · TF 위치 · LCD · 배터리를 `Driver`에 이어 줌 |
 | `fleet_agent/obstacle_node.py` | `obstacle` | 진행 방향 LiDAR 부채꼴로 막힘 판단, 사람(DYNAMIC) / 물건(STATIC) 구분 |
 | `fleet_agent/docking_node.py` | `docking` | 정밀 정차 요청을 받아 방법별로 맡김 (스레드에서 실행, 시간 초과 · 취소 처리) |
-| `fleet_agent/docking/marker_dock.py` | (모듈 + `marker_dock` 실행) | 마커 도킹 v4.3 (`Docker`): dock(D1~D4) · align(N14 마커 5 → 6). 혼자 실행으로 보정 · 목표 저장 |
+| `fleet_agent/docking/marker_dock.py` | (모듈 + `marker_dock` 실행) | 마커 도킹 v4.3 (`Docker`): dock(D1). 마커 측정 · 카메라 보정 · 목표 저장 (corridor도 이 측정을 씀) |
 | `fleet_agent/docking/line_dock.py` | (모듈) | tape: P1 E자 테이프로 바구니를 픽업대에 · tape_exit: 새 선까지 빼기 (바닥 IR 3개) |
-| `fleet_agent/docking/undock.py` | (모듈) | undock: D3/D4에서 마커로 N16/N15까지 + 회전 + 방위각 정렬 (주방 통로 후진 축) |
+| `fleet_agent/docking/undock.py` | (모듈) | undock: 통로 쪽 도크에서 마커로 N15/N16까지 + 좌90 + 방위각 정렬 (그다음 통로 넘겨받기) |
 | `fleet_agent/docking/marker_align.py` | (`marker_align` 실행) | 정렬 기준 저장 (`--record`) · 시험 |
+| `fleet_agent/docking/corridor.py` | (모듈) | 주방 통로: N14 정렬(마커 4 → 우90 → 5), 라이다 벽 따라 후진, 도크 들어가기(후면 주차) |
+| `fleet_agent/docking/dock_record.py` | (`dock_record` 실행) | 통로 · 도크 기록을 로봇이 직접 (`all` / `dock` / `align` / `check` / `scan`) |
 
 ## 노드 사이 인터페이스 (로봇 안, std_msgs/String JSON)
 
@@ -44,6 +46,10 @@
 - `REVERSE`는 `/cmd_vel` 직선 후진 (방향 P제어). 카메라가 못 보므로 장애물은 LiDAR만
 - 앞 Move와 drive가 다르면 그 노드에서 멈추고 진행 방향으로 제자리 회전한 뒤 출발 (후진이면 뒤가 진행 방향)
 - 노드마다 `NODE_REACHED`. `align` 노드(N14)는 지날 때 docking에 맞춤을 맡기고 이어 간다
+  (`hold_axis`면 맞춘 방향이 이어지는 후진의 축. 출발 회전 생략)
+- **통로 넘겨받기** (`corridor_handover: true`): 축이 정해진 뒤의 후진은 docking에 통째로 맡긴다 (`corridor_approach`).
+  줄 안에 도착지가 있고 `tape` / `dock_in`이면 그 정밀 동작까지, 아니면 줄 끝 노드까지 `corridor`(벽 따라 후진만).
+  끝나면 지나온 노드마다 `NODE_REACHED`를 차례로 보낸다
 - 줄이 비면 `done_grace_sec`(0.5초) 기다린 뒤 끝 처리: 후진으로 왔으면 노드 yaw로 회전 → `dock` / `tape`면 docking → `CMD_DONE`
 - 장애물 (obstacle `blocked`): 멈추고 `state = BLOCKED`
   - 사람: 3초 기다림 → 5초 LCD "지나갈게요" → 서버에 `BLOCKED` (`reason = "DYNAMIC:N14->N15"`)
@@ -57,8 +63,10 @@
 | method | 노드 | 구현 |
 |---|---|---|
 | `dock` | D1~D4 | `marker_dock.Docker.dock()` (마커 `marker`의 목표 파일로) → `back` m 후진 |
-| `align` | N14 | 같은 `Docker`로 `markers`를 차례로 (마커가 안 보이면 30°씩 돌며 찾기) |
-| `tape` | P1 | `line_dock.LineDocker.run()` — E자 테이프: 가로선 → X → 시계 90° → 동 선까지 후진 (T1~T6은 아직 미구현) |
+| `align` | N14 | `front`/`axis`가 있으면 `corridor.Steps.n14_align` (마커 4 → 우90 → 마커 5 벽면 수직). 없으면 예전 `markers` 방식 |
+| `tape` | P1 | `line_dock.LineDocker.run()` — E자 테이프: 가로선 → X → 시계 90° → 동 선까지 후진 (T1~T6은 아직 미구현). `corridor`면 먼저 벽 따라 가로선 앞까지 |
+| `dock_in` | 통로 쪽 도크 (그래프 D4 · D3) | `corridor.Steps.dock_in` — 벽 따라 N15(N16)까지 → 마커 5 거리 → 우90 → 마커 3(2)으로 N15 자세 → 후면 주차 |
+| `corridor` | 통로 중간 노드 | `corridor.Steps.follow_walls` — 라이다로 양옆 벽과 평행하게 `travel` m 후진 |
 | leave `undock` | D3 · D4를 떠날 때 | `undock.undock()` — 마커로 N16/N15까지, 왼쪽 90°, 방위각 정렬. 그 뒤 후진은 이 축 그대로 (`hold_axis`) |
 | leave `tape_exit` | P1을 떠날 때 | `line_dock.LineDocker.leave()` — 앞으로 가며 선을 세서 새 선에서 정지 → Nav2 |
 
@@ -68,22 +76,25 @@ ros2 run fleet_agent marker_dock --calibrate          # 처음 한 번: 카메�
 ros2 run fleet_agent marker_dock --record --id 3      # 도킹 자리마다: 로봇을 최종 위치에 두고 -> ~/dock_target_id3.json
 ros2 run fleet_agent marker_dock --dry-run --id 3     # 계획만 보기
 ```
-- 목표 파일은 마커 ID별이라, D3 자리에서 `--id 3`, N14에서 `--id 5`(동쪽 보고) · `--id 6`(남쪽 보고)처럼 저장한다
+- 목표 파일은 마커 ID별이다 (D1 `--id 1`). 주방 통로 쪽(N14 · D3 · D2)은 아래 `dock_record`로 기록한다
 - 도킹 로그 · 사진은 `~/dock_logs/`에 도킹마다 남는다
 
-## 주방 통로 · 픽업 (D3/D4 → N15/N16 → P2 → P1 → N4)
+## 주방 통로 · 픽업 · 도크 (N13 → N14 → N15/N16 → P2 → P1 → N4)
 
 ```
-D4 ──undock──▶ N15 ──(축 고정 후진)──▶ P2(대기) ──▶ P1 ──tape──▶ 바구니 삽입 ──[적재 완료]──tape_exit──▶ 새 선 ──Nav2──▶ N4
-     마커2 + 왼쪽 90° + 마커0 정렬          odom 축 유지         가로선 · X · 시계 90° · 동 선        선 세기
+N13 ─Nav2─▶ N14 ─align─▶ (축) ─통로 넘겨받기: 라이다 벽 따라 후진─▶ P1 tape ─[적재]─ tape_exit ─Nav2─▶ N4
+            마커 4 → 우90 → 마커 5            ├─▶ (도착지 D4) N15 → 우90 → 마커 3 → 후면 주차 (dock_in)
+D4 ──undock(마커 3 → 좌90 → 마커 5)──▶ N15 ──(축)── 통로 넘겨받기 ──▶ P1 ...
 ```
-- 서버 명령은 그대로다: `FORWARD [N15]` → `REVERSE [P2]` → `REVERSE [P1]` → (적재) → `FORWARD [N4 ...]`
-- `D4.leave`(undock)가 N15까지 대신 가므로 그 Move에서 Nav2는 안 쓴다. 이어지는 후진은 마커로 맞춘 축 그대로 가고,
-  N15에서 돌지 않으며 P2 · P1 끝 yaw 회전도 하지 않는다 (가로선 · 회전은 tape가 함)
-- P2 -> P1은 좌표까지 가지 않고 **tape에 바로 맡긴다** (tape_approach): P2에서 가로선(검검검)까지 8 cm/s로 후진해 멈춘다.
-  그래서 P1 좌표가 몇 cm 틀려도 상관없다 (최대 1.2 m 안에 가로선이 없으면 실패로 정지)
-- 축 고정 후진의 방향 유지는 **odom** 기준 (AMCL이 위치를 고칠 때 로봇이 따라 꺾이지 않게). 후진 속도 `reverse_speed` 0.08
-- 바닥 센서: `pinky_sensor_adc main_node` (robot_system이 `use_ir:=true`로 켬). 바닥 230~250, 테이프 4050~4095, 2000 넘으면 검정
+- 서버 명령은 그대로다: `FORWARD [N14]` → `REVERSE [N15 N16 P2 P1]` (또는 `[N15 D4]`) → … → `FORWARD [N4 ...]`
+- 후진 방향은 **양옆 벽(라이다)과 평행**. 실측: 마커 5 벽에 수직인 축이 통로와 약 3.8° 틀어져 있고 odom도 1 m에 3~4° 휨
+  → 예전 축 고정 후진(odom)은 주방 쪽으로 붙어 가로선을 비스듬히 밟았다. 지금은 스캔마다 벽 각도로 방향을,
+  서쪽 칸막이 거리로 좌우 밀림을 고친다 (실측: 1.3 m 후진에 방향 +3.9° → +8.9° 보정, 옆 ±2 cm 안, 서 선에 정확히 들어감)
+- 후진 중 마커 방위각으로는 방향을 고치지 않는다 (옆으로 밀린 만큼 더 밀리는 쪽으로 돌아서 오히려 주방에 붙음)
+- P1 가로선 12 cm 앞에서 tape로 넘긴다 (tape가 가로선 찾기부터). 지도 좌표가 몇 cm 틀려도 됨
+- 도크 들어가기는 마커가 가장 가까운 N15에서 위치 · 벽 방향을 정확히 맞추고, 후진하면서 1초에 15번 마커를 보며
+  칸 줄을 따라감 (최대 5° · 회전 속도 제한). 끝에서 멈춰 정답(d3 기록)과 비교해 앞뒤 마무리
+- 바닥 센서: `pinky_sensor_adc main_node` (robot_system이 `use_ir:=true`로 켬). 바닥 230~250, 테이프 4050~4095, 3000 넘으면 검정
 
 E자 테이프 (지도 방향, 북쪽 위 · 픽업대 오른쪽)
 ```
@@ -93,22 +104,25 @@ E자 테이프 (지도 방향, 북쪽 위 · 픽업대 오른쪽)
           ┃              메인선 (복도, 있어도 됨)
 ```
 
-준비 (로봇마다 한 번, fleet_agent는 끄고)
+준비 (로봇마다 한 번, fleet_agent는 끄고 bringup + 바닥 센서만)
 ```bash
-ros2 run fleet_agent marker_dock --calibrate                           # 카메라 보정 (처음 한 번)
-ros2 run fleet_agent marker_dock --id 2 --name n15 --record           # 로봇을 N15에, 서쪽 D4 마커 보게
-ros2 run fleet_agent marker_dock --id 2 --record                      # (D4 도킹 목표) 로봇을 D4 최종 자리에
-# D4에서 언도킹 + 왼쪽 90도 돈 자세(반듯한지 확인)에서:
-ros2 run fleet_agent marker_align --id 0 --size 0.05 --name n14 --record
+ros2 run fleet_agent marker_dock --calibrate     # 카메라 보정 (처음 한 번) -> ~/dock_cam.json
+ros2 run fleet_agent dock_record all             # 로봇을 최종 맵 D3 칸에 손으로 반듯하게 넣고: 로봇이 직접
+                                                 #   d3 · n15 · n15s · n14s · n14e 를 벽과 수직으로 맞추고 찍음
+ros2 run fleet_agent dock_record check           # 확인 (n15와 d3 차이 0이어야 함)
+ros2 run fleet_agent dock_record scan            # (필요하면) 지금 자리에서 라이다로 양옆 벽이 보이나
 ```
+기록 파일 형식: `fleet_msgs/docs/record_json_format.md`. 마커를 다시 붙이거나 벽을 옮기면 다시 기록한다.
+
 켜기
 ```bash
 ros2 launch fleet_agent robot_system.launch.xml robot_id:=pinky2 start_node:=D4 \
   use_docking:=true precision_stops:=$(ros2 pkg prefix fleet_msgs)/share/fleet_msgs/docs/precision_stops.yaml
 ```
-값 바꾸기: `precision_stops.yaml`의 `P1.x_after`(가로선 뒤 거리), `P1.leave.exit_legs`, `D4.leave` 마커 · 이름.
-그 밖의 기본값은 `docking/line_dock.py`의 `DEFAULTS` (속도 · 거리), `docking/undock.py` 맨 위.
-D3는 `D3.leave`에 같은 형식으로 (`target: n16, to: N16`, 정렬 기준 따로 저장) 넣으면 된다.
+값 바꾸기: `precision_stops.yaml`의 `N14`(기록 이름 · 회전), `D4`/`D3`(마커 · 기록 이름 · timeout · leave), `P1`.
+그 밖의 기본값은 `docking/corridor.py` 맨 위 (벽 따라가기 · 후면 주차), `docking/line_dock.py`의 `DEFAULTS` (테이프),
+`docking/undock.py` 맨 위. 그래프 D3(최종 맵 D2, N16 옆)는 `dock_record dock --dock d2`로 기록하면 바로 쓴다.
+통로 넘겨받기를 끄려면 `fleet_agent.yaml`의 `corridor_handover: false` (예전 odom 축 후진).
 
 ## 한 번에 켜기 (robot_system.launch.xml)
 

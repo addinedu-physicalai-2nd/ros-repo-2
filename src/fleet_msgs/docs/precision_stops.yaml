@@ -1,32 +1,53 @@
-# 로봇 쪽 정밀 정차 설정 (v7, 예시). fleet 에이전트가 읽는다. 서버는 이 파일을 모른다.
+# 로봇 쪽 정밀 정차 설정 (v8). fleet 에이전트가 읽는다. 서버는 이 파일을 모른다.
 # Waypoint.node_id로 찾아서, 그 노드에 도착한 뒤 아래 방법으로 정확히 선다.
 #
 # method
-#   dock  : 마커로 정렬한 뒤 back 만큼 후진해서 주차. 끝나면 CMD_DONE (marker_dock.py v4.3)
-#   align : 마커로 위치·방향만 맞추고 다음 Move를 이어 간다. 방향을 바꾸는 노드에서 쓴다
-#   tape  : 바닥 테이프(E자)로 바구니를 픽업대에 넣음. 끝나면 CMD_DONE (마지막 노드일 때)
+#   dock    : 마커로 정렬한 뒤 back 만큼 후진해서 주차. 끝나면 CMD_DONE (marker_dock.py v4.3)
+#   align   : 마커로 위치·방향만 맞추고 다음 Move를 이어 간다. 방향을 바꾸는 노드에서 쓴다
+#             front/axis가 있으면 N14 방식 (docking/corridor.py): 마커 4(front) 찾기 · 정렬 -> 기록 거리 -> turn_deg
+#             -> 마커 5(axis)와 벽면 수직.  hold_axis: true -> 이 방향이 이어지는 후진의 축 (출발 회전 생략)
+#   tape    : 바닥 테이프(E자)로 바구니를 픽업대에 넣음. 끝나면 CMD_DONE (도착지일 때)
+#   dock_in : 통로 쪽 도크 (후진으로 칸에 넣음): 통로 -> 마커 5 거리로 stop 자리 -> 우90 -> 도크 마커로 stop 자세
+#             -> target 자세까지 후면 주차 (docking/corridor.py Steps.dock_in)
+#             stop · target = ~/dock_target_<이름>.json, via = ~/align_<이름>.json
+#   timeout : (선택) docking이 이 초 안에 못 끝내면 멈추고 Nav2 위치 인정. 없으면 docking timeout_sec (40)
+#
+# 통로 넘겨받기 (fleet_agent corridor_handover: true, 기본)
+#   축이 정해진 뒤(N14 align hold_axis, undock hold_axis)의 후진은 fleet_agent가 cmd_vel로 직접 가지 않고
+#   docking에 통째로 맡긴다: 라이다로 양옆 벽과 평행하게 후진 (마커 5 벽 축은 통로와 약 3.8° 틀어져 있고
+#   odom도 1 m에 3~4° 휨 -> 예전 축 고정 후진은 주방 쪽으로 붙었음)
+#     도착지가 줄 안에 있고 tape / dock_in이면 그 정밀 동작까지 한 번에 (요청에 corridor: true, travel: m)
+#     도착지가 줄 밖이면 (lock 때문에 중간까지만) 줄 끝 노드까지 method: corridor (벽 따라 후진만)
+#   corridor: false 를 노드 설정에 넣으면 그 노드는 예전 방식 (tape_approach / cmd_vel 후진)
 #
 # leave (선택): 그 노드에서 CMD_DONE 한 뒤 다음 출발 전에 하는 정밀 동작 (켤 때 서 있던 노드도 해당)
 #   undock    : 마커로 나올 자리(to)까지 + turn_deg 회전 + 방위각 정렬. to 노드 도착으로 치고 Nav2는 안 씀
-#               target = ~/dock_target_<target>.json  (ros2 run fleet_agent marker_dock --id <marker> --name <target> --record)
-#               align  = ~/align_<align>.json         (ros2 run fleet_agent marker_align --id <ID> --size 0.05 --name <align> --record)
-#               hold_axis: true -> 이어지는 후진(N15 -> P2 -> P1)을 맞춘 방향 그대로 (회전 · 끝 yaw 회전 생략)
+#               target = ~/dock_target_<target>.json, align = ~/align_<align>.json
+#               hold_axis: true -> 이어지는 후진을 맞춘 방향 그대로 (그다음 통로 넘겨받기)
 #   tape_exit : 앞으로 가며 테이프 선을 세서 exit_legs번째(기본 2 = 새 선)에서 정지 -> 그다음 Nav2
-#   quiet_to_next: true -> leave 뒤 다음 노드에 닿을 때까지 LiDAR 장애물 정지를 끔 (P1 -> N4 좁은 틈. Nav2 costmap은 그대로)
+#   quiet_to_next: true -> leave 뒤 다음 노드에 닿을 때까지 LiDAR 장애물 정지를 끔 (P1 -> N4 좁은 틈)
 #
-# 마커 ID와 back 거리는 예시다. 마커를 붙이고 --record 한 뒤 실제 값으로 바꾼다.
+# 기록 (fleet_agent 끄고 bringup + 바닥 센서만): ros2 run fleet_agent dock_record all
+#   D3 칸에 손으로 반듯하게 넣으면 로봇이 직접 d3 · n15 · n15s · n14s · n14e 를 맞추고 찍음
+#   형식: fleet_msgs/docs/record_json_format.md
+#
+# 마커 ID (최종 맵): 1 D1 · 2 D2 칸 앞 칸막이 (N16 옆) · 3 D3 칸 앞 칸막이 (N15 옆) · 4 N14 동쪽 벽 · 5 N14 남쪽 벽 (5 cm)
+#   · 6 입구 박스 (D1 정렬, 5 cm) · 11~62 테이블 다리
+# 노드 이름은 아직 node_graph v7 그대로: 그래프 D4 = 최종 맵 D3 (N15 옆), 그래프 D3 = 최종 맵 D2 (N16 옆),
+#   그래프 D2 (왼쪽) = 최종 맵에서 없어짐. node_graph를 새 맵으로 고칠 때 이름도 같이 바꾼다
 # 목록에 없는 노드는 Nav2 / odom 도착만으로 끝낸다.
 
-N14: {method: align, markers: [5, 6]}   # 5 = 오른쪽 바깥 벽 (멈춤 위치 = 통로 좌우 위치), 6 = 아래 벽 (후진 축)
+N14: {method: align, front: n14e, axis: n14s, turn_deg: -90, hold_axis: true}   # 마커 4 -> 우90 -> 마커 5
 
-D1:  {method: dock, marker: 1, back: 0.0}   # 마커: 왼쪽 바깥 벽 (로봇 앞)
-D2:  {method: dock, marker: 2, back: 0.0}
-D3:  {method: dock, marker: 3, back: 0.10}  # 마커: 통로 건너 오른쪽 안쪽 벽 (로봇 앞)
-D4:  {method: dock, marker: 2, back: 0.10,   # D4 벽 마커 실측 ID 2
-      leave: {method: undock, marker: 2, target: n15, to: N15, turn_deg: 90, align: n14, hold_axis: true}}
+D1:  {method: dock, marker: 1, back: 0.0}   # 마커 1: 왼쪽 바깥 벽 (입구 정렬 마커 6 방식은 아직)
+D2:  {method: dock, marker: 2, back: 0.0}   # 최종 맵에서 없어진 칸 (그래프 정리 때 지움)
+D3:  {method: dock_in, marker: 2, stop: n16, target: d2, via: n16s, timeout: 70,    # 최종 맵 D2 (N16 옆). 기록: dock_record dock --dock d2
+      leave: {method: undock, marker: 2, target: n16, to: N16, turn_deg: 90, align: n16s, hold_axis: true}}
+D4:  {method: dock_in, marker: 3, stop: n15, target: d3, via: n15s, timeout: 70,    # 최종 맵 D3 (N15 옆)
+      leave: {method: undock, marker: 3, target: n15, to: N15, turn_deg: 90, align: n15s, hold_axis: true}}
 
-P1:  {method: tape, x_after: 0.035,          # 바구니(뒤)를 주방 픽업대에 넣음 (E자 테이프)
-      leave: {method: tape_exit, exit_legs: 2, quiet_to_next: true}}  # 받은 뒤 새 선까지 빼고 Nav2 (N4). N4까지 좁은 틈이라 LiDAR 정지 끔
+P1:  {method: tape, x_after: 0.035, timeout: 60,          # 바구니(뒤)를 주방 픽업대에 넣음 (E자 테이프)
+      leave: {method: tape_exit, exit_legs: 2, quiet_to_next: true}}  # 받은 뒤 새 선까지 빼고 Nav2 (N4)
 
 # 테이블 정차: 테이프로 정밀하게 넣을 예정 (잠정. 방식이 정해지면 수정)
 T1:  {method: tape}

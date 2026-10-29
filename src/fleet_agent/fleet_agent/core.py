@@ -40,7 +40,7 @@ def load_precision_stops(path):
         data = yaml.safe_load(f) or {}
     out = {}
     for node, cfg in data.items():
-        if isinstance(cfg, dict) and cfg.get('method') in ('dock', 'align', 'tape'):
+        if isinstance(cfg, dict) and cfg.get('method') in ('dock', 'align', 'tape', 'dock_in'):
             out[str(node)] = dict(cfg)
     return out
 
@@ -253,6 +253,12 @@ class Driver:
                    방향은 odom으로 유지 (io.odom_yaw가 있으면). 맵(AMCL) 보정에 따라 꺾이지 않는다
       - 축 고정 후진으로 tape 노드(P1)에 갈 때는 좌표까지 가지 않고 tape에 바로 맡긴다 (tape_approach):
         tape가 바닥 가로선을 보며 후진해 멈추고 삽입까지 -> NODE_REACHED · CMD_DONE (좌표가 조금 틀려도 됨)
+      - 통로 넘겨받기 (corridor=True, 기본): 축이 정해진 뒤(N14 align hold_axis, undock hold_axis) 후진은
+        cmd_vel로 직접 가지 않고 docking에 통째로 맡긴다 (corridor_approach). docking이 라이다로 양옆 벽과
+        평행하게 후진 (odom · 마커 5 벽 축은 통로와 몇 ° 틀어져서 주방 쪽으로 붙었음)
+          줄 안에 도착지가 있고 그게 tape / dock_in이면 -> 그 정밀 동작까지 한 번에 (corridor=True, travel)
+          도착지가 줄 밖이면 (lock 때문에 서버가 중간까지만 보냄) -> 줄 끝 노드까지 method=corridor
+        끝나면 지나온 노드마다 NODE_REACHED를 차례로 보내고 마지막 노드에서 평소처럼 처리 (도착지면 CMD_DONE)
     안내 (Move.guide = true): 서버는 "안내 중"과 도착지만 알려 주고, 나머지는 로봇이 판단한다
       - 인사 : 안내가 아닌 상태에서 안내 Move를 처음 받으면, 떠나기 전에 Guide 'greet' (앞 카메라로 손님 기다림)
       - 확인 : 꺾이는 노드(들어온 방향과 나갈 방향이 check_turn 넘게 다름)에서 멈춤 -> 뒤로 돎 -> Guide 'watch'
@@ -262,7 +268,7 @@ class Driver:
     """
 
     def __init__(self, io, stops, pass_tol=0.08, yaw_tol=0.15, done_grace=0.5, reverse=None, policy=None,
-                 nav_retries=1, check_turn_deg=45.0, check_gap=0.8):
+                 nav_retries=1, check_turn_deg=45.0, check_gap=0.8, corridor=True):
         self.io = io
         self.stops = stops
         self.pass_tol = pass_tol      # 중간 노드 통과 판정 거리 (다음 노드로 바로 넘어감)
@@ -306,6 +312,10 @@ class Driver:
         self.prec_done_node = ''      # tape_approach로 정밀 정차를 이미 끝낸 노드
         self.quiet_obstacle = False   # leave quiet_to_next: 다음 노드 도착까지 LiDAR 장애물 판단 안 함 (좁은 틈 통과)
         self.skip_turn = False        # 다음 방향 바뀜 회전 생략 (축을 이미 맞춤)
+        self.corridor = corridor      # 축 고정 후진을 docking(라이다 벽 따라가기)에 맡김
+        self.handover = []            # corridor_approach로 맡긴 노드들 (끝나면 차례로 NODE_REACHED)
+        self.handover_req = None
+        self._last_pose = (0.0, 0.0, 0.0)
 
     # ------------------------------------------------------------ 입력
     def on_move(self, cmd_id, append, drive, waypoints, guide=False, goal=''):
@@ -318,6 +328,7 @@ class Driver:
                 self.leave_from = self.leave_req['node']   # 아직 못 떠났다 -> 새 명령 출발 때 다시
             self._stop_motion()
             self.queue.apply(cmd_id, False, drive, waypoints, guide, goal)
+            self.handover, self.handover_req = [], None
             self.cur = None
             self.phase = 'idle'
             self.error = False
@@ -344,6 +355,7 @@ class Driver:
         elif cmd == CANCEL:
             self._stop_motion()
             self.in_guide = False
+            self.handover, self.handover_req = [], None
             self.queue.clear()
             self.cur = None
             self.phase = 'idle'
@@ -354,7 +366,8 @@ class Driver:
             self.nav_state = 'ok' if ok else 'fail'
 
     def on_precision_result(self, ok, detail=''):
-        if self.phase in ('align', 'precision', 'leave', 'tape_approach') and self.prec_state == 'running':
+        if self.phase in ('align', 'precision', 'leave', 'tape_approach', 'corridor_approach') \
+                and self.prec_state == 'running':
             self.prec_state = 'ok'
             self.prec_ok = ok
             if not ok:
@@ -384,6 +397,8 @@ class Driver:
     # ------------------------------------------------------------ 주기 처리
     def tick(self, now, pose):
         self.now = now
+        if pose is not None:
+            self._last_pose = pose
         if pose is None or self.paused or self.error:
             return
         moving = self.phase in ('nav', 'reverse') and not self.quiet_obstacle   # 정밀 동작(tape 등) 중에는 장애물 판단 안 함
@@ -446,6 +461,10 @@ class Driver:
             if self.prec_state == 'ok':
                 self.prec_state = ''
                 if self.phase == 'align':
+                    if self.prec_ok and self.stops.get(self.cur.node_id, {}).get('hold_axis'):
+                        self.axis = pose[2]             # 정렬한 방향 = 이어지는 후진의 축 (출발 회전 생략)
+                        self.axis_odom = self._odom_yaw()
+                        self.skip_turn = True
                     self._after_node(pose)
                 else:
                     self._done()
@@ -468,6 +487,19 @@ class Driver:
             if self.prec_state == 'ok':
                 self.prec_state = ''
                 self.prec_done_node = self.cur.node_id
+                self._reached(pose)
+        elif self.phase == 'corridor_approach':
+            if self.prec_state == 'ok':
+                self.prec_state = ''
+                steps, self.handover, req = self.handover, [], self.handover_req or {}
+                self.handover_req = None
+                for st in steps[:-1]:             # 지나온 노드 (docking이 한 번에 지나감)
+                    self.io.event(NODE_REACHED, st.cmd_id, st.node_id, '')
+                    self.last_node = st.node_id
+                    self.prev_xy = (st.x, st.y)
+                self.cur = steps[-1]
+                if req.get('method') != 'corridor':
+                    self.prec_done_node = self.cur.node_id   # tape / dock_in을 이미 함
                 self._reached(pose)
         elif self.phase == 'grace':
             if len(self.queue):
@@ -544,6 +576,8 @@ class Driver:
             self.io.direction('FORWARD')
             self.io.nav_go(self.cur.x, self.cur.y, self.cur.yaw)
         else:
+            if self.axis is not None and self.corridor and self._corridor_handover(pose):
+                return
             stop = self.stops.get(self.cur.node_id, {})
             if (self.axis is not None and stop.get('method') == 'tape' and stop.get('approach', True)
                     and self._precise_here(self.cur)):
@@ -568,6 +602,11 @@ class Driver:
         elif self.phase == 'tape_approach':
             self.prec_state = 'running'
             self.io.precision(dict(self.stops.get(self.cur.node_id, {}), node=self.cur.node_id, approach=True))
+        elif self.phase == 'corridor_approach' and self.handover_req:
+            # 멈췄던 자리에서 남은 거리를 다시 재서 맡김
+            self.prec_state = 'running'
+            self.handover_req['travel'] = round(self._travel_to(self._last_pose, self.handover[-1]), 3)
+            self.io.precision(dict(self.handover_req))
         elif self.phase == 'leave' and self.leave_req:
             self.prec_state = 'running'
             self.io.precision(self.leave_req)
@@ -656,6 +695,49 @@ class Driver:
         if self.cur.guide and self._at_goal(self.cur):
             self.io.guide({'action': 'arrive', 'node': self.cur.node_id})  # 도착 효과 (기다리지 않음)
 
+    def _travel_to(self, pose, step):
+        """축 따라 뒤로 (pose -> step 노드) 남은 거리 (지도 좌표, 옆으로 비킨 도크는 그 줄까지)"""
+        b = self.axis + math.pi
+        return max(0.0, (step.x - pose[0]) * math.cos(b) + (step.y - pose[1]) * math.sin(b))
+
+    def _corridor_handover(self, pose):
+        """축 고정 후진을 docking에 통째로 맡긴다 -> 맡겼으면 True
+        줄 = 지금 노드 + 뒤에 이어지는 REVERSE 노드들. 그 안에 도착지가 있고 tape / dock_in이면 그 노드까지 정밀 동작 포함,
+        없으면 줄 끝 노드까지 method=corridor (벽 따라 후진만)"""
+        run = [self.cur]
+        for st in self.queue.steps:
+            if st.drive != REVERSE:
+                break
+            run.append(st)
+        target, req = None, None
+        for i, st in enumerate(run):
+            last = (i == len(run) - 1) and len(run) - 1 == len(self.queue)
+            at_goal = (st.node_id == st.goal) if st.goal else last
+            if at_goal and not st.guide:
+                stop = self.stops.get(st.node_id, {})
+                if stop.get('method') in ('tape', 'dock_in') and stop.get('corridor', True):
+                    target = i
+                    req = dict(stop, node=st.node_id, corridor=True, approach=True)
+                    break
+                return False              # 도착지 정밀 정차가 통로용이 아님 -> 예전 방식
+        if target is None:
+            target = len(run) - 1
+            req = {'method': 'corridor', 'node': run[target].node_id}
+        req['travel'] = round(self._travel_to(pose, run[target]), 3)
+        if req['method'] == 'corridor' and req['travel'] < 0.03:
+            return False                  # 거의 다 옴: 예전 후진으로 마무리
+        req['from_node'] = self.last_node
+        self.handover = run[:target + 1]
+        del self.queue.steps[:target]     # cur는 이미 꺼냄. 뒤의 target개를 맡김
+        self.handover_req = req
+        self.io.cmd_vel(0.0, 0.0)
+        self.phase = 'corridor_approach'
+        self.prec_state = 'running'
+        self.io.direction('STOP')         # 통로는 좁고 벽에 붙음: LiDAR 장애물 판단 끔 (tape_approach와 같음)
+        self.io.log(f'통로 넘겨받기: {[s.node_id for s in self.handover]} {req["method"]} {req["travel"]:.2f} m')
+        self.io.precision(dict(req))
+        return True
+
     def _odom_yaw(self):
         f = getattr(self.io, 'odom_yaw', None)
         try:
@@ -726,7 +808,7 @@ class Driver:
     def _stop_motion(self, keep=False, keep_dir=False):
         self.io.cmd_vel(0.0, 0.0)
         self.io.nav_cancel()
-        if self.phase in ('align', 'precision', 'leave', 'tape_approach'):
+        if self.phase in ('align', 'precision', 'leave', 'tape_approach', 'corridor_approach'):
             self.io.precision_cancel()
         if self.phase in ('guide_greet', 'guide_watch'):
             self.io.guide_cancel()
