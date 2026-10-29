@@ -384,7 +384,7 @@ class Driver:
         self.now = now
         if pose is None or self.paused or self.error:
             return
-        moving = self.phase in ('nav', 'reverse', 'tape_approach')
+        moving = self.phase in ('nav', 'reverse')   # 정밀 동작(tape 등) 중에는 장애물 판단 안 함
         if moving or self.holding:
             ask, report = self.policy.update(now, self.obstacle)
             if self.obstacle:
@@ -546,7 +546,7 @@ class Driver:
                 self.io.cmd_vel(0.0, 0.0)  # 여기서부터 /cmd_vel은 docking(tape)이 씀
                 self.phase = 'tape_approach'
                 self.prec_state = 'running'
-                self.io.direction('REVERSE')
+                self.io.direction('STOP')   # 픽업대 · 벽에 붙어야 하니 LiDAR 장애물 판단 끔
                 self.io.precision(dict(stop, node=self.cur.node_id, approach=True))
                 return
             self.phase = 'reverse'
