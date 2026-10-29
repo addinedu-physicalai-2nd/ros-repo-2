@@ -53,6 +53,8 @@
   docking이 바닥 가로선(N15 · N16)을 밟거나 거리(P2)로 노드를 지날 때마다 `/docking/progress` → 그 노드 `NODE_REACHED` (안 섬)
   → 서버가 다음 노드를 `APPEND` → `/docking/extend`로 달리는 docking에 이어 붙임. 도착지가 `tape` / `dock_in`이면 `then`으로 같이.
   이어 붙이기가 늦어 docking이 먼저 섰으면(`reached`) 못 간 노드는 큐로 돌려 그 자리에서 다시 넘겨받는다
+  docking이 실패하거나 시간 초과(`ok` + `timeout`)면 도착으로 치지 않는다: progress로 지난 노드까지만 `NODE_REACHED`,
+  `CMD_FAILED reason="corridor_failed:<맡긴 끝 노드>:<이유>"` -> 서버 고장 처리 (lock 유지). 재개하면 남은 노드로 다시 맡김
 - 줄이 비면 `done_grace_sec`(0.5초) 기다린 뒤 끝 처리: 후진으로 왔으면 노드 yaw로 회전 → `dock` / `tape`면 docking → `CMD_DONE`
 - 장애물 (obstacle `blocked`): 멈추고 `state = BLOCKED`
   - 사람: 3초 기다림 → 5초 LCD "지나갈게요" → 서버에 `BLOCKED` (`reason = "DYNAMIC:N14->N15"`)

@@ -262,6 +262,8 @@ class Driver:
           줄 안에 도착지가 있고 tape / dock_in이면 then으로 같이 맡김 (P1 삽입, 도크 줄 선에서 우90 -> 후면 주차)
         끝나면(result.reached) 그 노드에서 평소처럼 처리 (도착지면 CMD_DONE). 이어 붙이기가 늦어 docking이 먼저 섰으면
         못 간 노드는 큐로 돌려 거기서 다시 넘겨받기
+        docking이 실패하거나 시간 초과면 도착으로 치지 않고 멈춤 -> CMD_FAILED reason="corridor_failed:<노드>:<이유>"
+        (재개하면 남은 노드로 다시 맡김)
     안내 (Move.guide = true): 서버는 "안내 중"과 도착지만 알려 주고, 나머지는 로봇이 판단한다
       - 인사 : 안내가 아닌 상태에서 안내 Move를 처음 받으면, 떠나기 전에 Guide 'greet' (앞 카메라로 손님 기다림)
       - 확인 : 꺾이는 노드(들어온 방향과 나갈 방향이 check_turn 넘게 다름)에서 멈춤 -> 뒤로 돎 -> Guide 'watch'
@@ -320,6 +322,7 @@ class Driver:
         self.handover = []            # corridor_approach로 맡긴 노드들 (지날 때마다 앞에서 빠짐)
         self.handover_req = None
         self.prec_info = {}           # docking 결과에 붙은 값 (corridor reached · then_done)
+        self.prec_result = ''         # 마지막 정밀 정차 결과 detail
         self._last_pose = (0.0, 0.0, 0.0)
 
     # ------------------------------------------------------------ 입력
@@ -378,7 +381,10 @@ class Driver:
             self.prec_state = 'ok'
             self.prec_ok = ok
             self.prec_info = dict(info or {})
-            if not ok:
+            self.prec_result = detail     # 통로: ok여도 'timeout...'이면 실패로 봄
+            if not ok and self.phase == 'corridor_approach':
+                self.io.log(f'통로 docking 실패: {detail}')
+            elif not ok:
                 self.io.log(f'정밀 정차 실패, Nav2 위치로 진행: {detail}')
                 self.prec_detail = f'{self.cur.node_id if self.cur else ""}:{detail}'
 
@@ -523,6 +529,9 @@ class Driver:
         elif self.phase == 'corridor_approach':
             if self.prec_state == 'ok':
                 self.prec_state = ''
+                if not self.prec_ok or str(self.prec_result).startswith('timeout'):
+                    self._corridor_failed()
+                    return
                 steps, self.handover, req = self.handover, [], self.handover_req or {}
                 self.handover_req = None
                 names = [s_.node_id for s_ in steps]
@@ -799,6 +808,28 @@ class Driver:
         self.io.log(f'통로 넘겨받기: {req["nodes"]} then {(then or {}).get("method")}')
         self.io.precision(dict(req))
         return True
+
+    def _corridor_failed(self):
+        """통로 docking 실패 (시간 초과 포함): 로봇은 통로 어딘가에 서 있다 -> 도착으로 치지 않는다
+        progress로 이미 보낸 노드까지만 지난 것 (result.reached가 그보다 앞이면 그 앞 노드까지 보냄)
+        남은 노드는 handover에 그대로 두고 CMD_FAILED reason="corridor_failed:<맡긴 끝 노드>:<이유>"
+        -> 서버는 고장 처리 (lock 유지, 직원 확인 후 재개). 재개(RESUME)하면 _resume이 남은 노드로 다시 맡김"""
+        names = [s_.node_id for s_ in self.handover]
+        reached = self.prec_info.get('reached')
+        if reached in names[:-1]:
+            idx = names.index(reached)
+            for st in self.handover[:idx]:
+                self._pass_step(st)
+            self.handover = self.handover[idx:]
+        if self.handover:
+            self.cur = self.handover[0]
+        end = self.handover[-1].node_id if self.handover else self.last_node
+        reason = f'corridor_failed:{end}:{self.prec_result or "fail"}'
+        self.prec_detail = ''
+        self.io.cmd_vel(0.0, 0.0)
+        self.io.log(f'통로 실패 -> 멈춤 ({reason})')
+        self.io.event(CMD_FAILED, self.queue.cmd_id, self.last_node, reason)
+        self.error = True             # phase · handover · handover_req 유지 (RESUME이면 이어서)
 
     def _corridor_extend(self):
         """통로 후진 중 APPEND: 이어지는 REVERSE 노드를 달리는 docking에 붙임 (then이 이미 있으면 안 붙임)"""
