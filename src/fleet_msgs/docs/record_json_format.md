@@ -174,6 +174,9 @@ ros2 run fleet_agent dock_record check                     # rad -> cm · ° 로
 ros2 run fleet_agent dock_record scan                      # 지금 자리에서 라이다로 양옆 벽이 보이나
 ```
 
+`all`(N15) · `dock --dock d2`(N16)가 끝난 자세(좌90, 남쪽을 봄)에서 바닥 센서 3개 바로 밑에 그 노드의 가로선을 붙입니다.
+통로 docking은 이 선을 밟는 순간을 그 노드 도착으로 칩니다 (`docking/corridor.py` BAR_*).
+
 ## 5. 마커 ID (최종 맵)
 
 | ID | 크기 | 위치 |
@@ -186,4 +189,4 @@ ros2 run fleet_agent dock_record scan                      # 지금 자리에서
 | 6 | 5 cm | 입구 박스 아랫면 (D1 정렬) |
 | 11·12 ~ 61·62 | - | 테이블 다리 (테이블 번호 + 1 왼쪽 / 2 오른쪽) |
 
-도크 이름은 최종 맵 기준입니다 (D1, 오른쪽 위 D2, 아래 D3). 레포 `node_graph.yaml`은 아직 예전 이름이라, `precision_stops.yaml`에서 그래프 D4 = 최종 D3, 그래프 D3 = 최종 D2로 설정해 두었습니다.
+도크 이름은 최종 맵 기준입니다 (D1, 오른쪽 위 D2, 아래 D3). `node_graph.yaml` v7.1 · `precision_stops.yaml`도 같은 이름입니다.

@@ -89,6 +89,8 @@ class FleetAgent(Node):
         self.lcd_pub = self.create_publisher(String, '/lcd/text', latched)
         self.dock_req_pub = self.create_publisher(String, '/docking/request', reliable)
         self.dock_cancel_pub = self.create_publisher(String, '/docking/cancel', reliable)
+        self.dock_extend_pub = self.create_publisher(String, '/docking/extend', reliable)
+        self.create_subscription(String, '/docking/progress', self.on_dock_progress, reliable)
         self.dir_pub = self.create_publisher(String, '/obstacle/direction', latched)
         self.create_subscription(String, '/docking/result', self.on_dock_result, reliable)
         self.create_subscription(String, '/obstacle/status', self.on_obstacle, 10)
@@ -252,6 +254,21 @@ class FleetAgent(Node):
     def precision_cancel(self):
         self.dock_cancel_pub.publish(String(data=json.dumps({'id': self.dock_req_id})))
 
+    def precision_extend(self, req):   # Driver io: 통로 후진 중 길이 늘어남 (같은 요청 id)
+        req = dict(req)
+        req['id'] = self.dock_req_id
+        self.dock_extend_pub.publish(String(data=json.dumps(req)))
+        self.get_logger().info(f'통로 이어 감 {req}')
+
+    def on_dock_progress(self, msg):
+        try:
+            r = json.loads(msg.data)
+        except ValueError:
+            return
+        if r.get('id') != self.dock_req_id:
+            return
+        self.driver.on_precision_progress(r.get('node', ''))
+
     def on_dock_result(self, msg):
         try:
             r = json.loads(msg.data)
@@ -260,7 +277,8 @@ class FleetAgent(Node):
         if r.get('id') != self.dock_req_id:
             return
         self.get_logger().info(f'정밀 정차 결과 {r}')
-        self.driver.on_precision_result(bool(r.get('ok')), r.get('detail', ''))
+        self.driver.on_precision_result(bool(r.get('ok')), r.get('detail', ''),
+                                        {k: r[k] for k in ('reached', 'then_done') if k in r})
 
     def guide(self, req):
         self.guide_req_id += 1

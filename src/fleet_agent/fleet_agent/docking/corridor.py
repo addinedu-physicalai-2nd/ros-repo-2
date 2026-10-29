@@ -2,9 +2,18 @@
 
 docking 노드가 부른다 (method)
   align (front/axis 있음) : Steps.n14_align     N14에서 마커 4 -> 우90 -> 마커 5 벽면 수직
-  corridor               : Steps.follow_walls  축 고정 후진을 라이다 벽 평행으로 (중간 노드까지)
-  tape (corridor=True)   : follow_walls로 가로선 앞까지 -> line_dock.LineDocker.run
-  dock_in                : Steps.dock_in       통로 -> N15(N16) -> 우90 -> 마커로 후면 주차
+  corridor               : Steps.follow_bars   축 고정 후진을 라이다 벽 평행으로. 바닥 가로선(N15 · N16)을 밟을 때마다
+                                               progress(노드)를 알리고 안 섬. nodes는 달리는 중에 늘어날 수 있음 (APPEND)
+                           then = tape   -> P1 가로선에서 line_dock.LineDocker.run (삽입)
+                           then = dock_in -> 도크 줄 가로선(N15 / N16)에서 서고 Steps.park_from_line (우90 -> 마커 -> 후면 주차)
+  dock_in (corridor 없이) : Steps.dock_in       마커 5 거리로 N15 -> 우90 -> 마커로 후면 주차 (예전 방식)
+
+가로선 (N15 · N16, 검정 테이프 폭 약 2 cm, 센서 값 4095)
+  - 바닥 센서 3개 모두 BAR_BLACK(3800) 넘음이 BAR_CONFIRM(2)번 연속이어야 선. 실측: 바닥이 약 20 cm마다 한 번씩
+    3개 모두 ~3500으로 튐 (1번) -> 문턱 · 연속 둘 다로 거름
+  - 노드 사이 거리 BAR_GAP (바닥 기록 실측). 예상의 EARLY(0.5)도 안 갔는데 나온 선은 무시,
+    예상 + MISS_M을 넘어도 안 나오면 거리로 그 노드를 치고 (MISS 뒤 RESYNC_M 안에 나온 선은 그 노드의 늦은 선)
+  - P2는 선 없이 N16에서 거리, P1은 E자 가로선
 
 원칙
   - 마커는 멈춰서 재고 움직임은 odom. 가까우면 마커 기울기, 멀면 방위각
@@ -33,7 +42,7 @@ VERIFY_DEG = 2.0
 MAX_DEG = 35.0
 FRAMES = 8
 YAW_OK_Z = 0.22       # 2.5 cm 마커 기준, 이보다 가까우면 기울기(yaw)를 믿음 (크기에 비례)
-MATCH_LAT_M = 0.020   # N15 맞추기: 옆으로 이보다 벗어났을 때만 옆걸음 (작은 건 후진하며 고침)
+MATCH_LAT_M = 0.008   # N15 맞추기: 옆으로 이보다 벗어났을 때만 옆걸음 (후진 18 cm로는 1 cm 남짓을 못 고침)
 MATCH_DEG = 1.5       # N15 맞추기: 방향 이보다 틀어졌을 때만 회전
 FOLLOW_V = 0.08       # 통로 후진 속도 (reverse_speed와 같음)
 FOLLOW_STOP_EARLY = 0.12   # P1: 노드 좌표보다 이만큼 앞에서 tape로 넘김 (tape가 가로선 찾기부터)
@@ -53,6 +62,18 @@ PARK_STEER_DEG = 5.0
 PARK_K_HEAD = 2.5
 PARK_W_MAX = 0.25
 PARK_ALPHA = 0.25
+# 통로 가로선 (follow_bars)
+BAR_BLACK = 3800      # 가로선 문턱 (테이프 4095, 튀는 값 ~3500, 흰 바닥 ~240)
+BAR_CONFIRM = 2       # 연속 이만큼 검검검이어야 선
+BAR_KIND = {'N15': 'bar', 'N16': 'bar', 'P2': 'dist', 'P1': 'bar'}
+BAR_GAP = {'N15': 0.40, 'N16': 0.15, 'P2': 0.48, 'P1': 0.44}   # 앞 노드에서 거리 m (N14->N15 · N15->N16 바닥 기록 실측)
+W_REF = 0.173         # 서쪽 칸막이에서 로봇 중심까지 = 통로 가운데 (남쪽을 보면 오른쪽 벽)
+EARLY = 0.5
+MISS_M = 0.10
+RESYNC_M = 0.12
+START_GUARD_M = 0.06  # 출발 자리가 선 근처인데 선 위가 아니었으면, 이 안에서 밟는 선은 출발 자리 선
+V_BAR_SLOW = 0.04     # 서야 할 선 근처 (그리고 P2 -> P1)
+SLOW_M = 0.06
 
 
 def bearing(m):
@@ -67,6 +88,23 @@ def _load(path):
 def _save(path, d):
     with open(os.path.expanduser(path), 'w') as f:
         json.dump(d, f, indent=2)
+
+
+def bar_update(ir, v):
+    """바닥 센서 콜백에서 부름: ir['bar_n'] = 지금까지 밟은 가로선 수, ir['on'] = 지금 선 위"""
+    allb = all(x > BAR_BLACK for x in v[:3])
+    ir['run'] = ir.get('run', 0) + 1 if allb else 0
+    if ir.get('on') is None:
+        ir['on'] = allb
+        ir.setdefault('bar_n', 0)
+    elif allb and not ir['on']:
+        if ir['run'] >= BAR_CONFIRM:
+            ir['on'] = True
+            ir['bar_n'] = ir.get('bar_n', 0) + 1
+    elif not allb:
+        ir['white'] = ir.get('white', 0) + 1 if ir['on'] else 0
+        if ir['on'] and ir['white'] >= 2:
+            ir['on'], ir['white'] = False, 0
 
 
 def align_record(mid, size, m):
@@ -242,14 +280,14 @@ class Steps:
                 break
         return D, phi
 
-    def park(self, marker, stop_rec, target_rec):
+    def park(self, marker, stop_rec, target_rec, name='N15'):
         """후면 주차 (실무 도킹 방식: 움직이면서 계속 보고, 정답 자세와 비교하며 줄을 따라감)
         - 정답 = D3 기록 자세. 벽 방향은 N15에서 멈춰서 잰 값(가장 정확)으로 고정
         - 후진 중 매 프레임 마커 위치를 재서 도크 위치를 조금씩 고침 (가까울수록 많이 믿음)
         - 줄에서 옆으로 벗어난 만큼만 아주 살짝 기움 (최대 PARK_STEER_DEG, 회전 속도 PARK_W_MAX 제한) -> 크게 안 틈
         - 끝: 멈춰서 정답 자세와 비교, 앞뒤 · 방향 마무리"""
         import time
-        D, phi = self.match(marker, stop_rec, 'N15 맞추기')
+        D, phi = self.match(marker, stop_rec, f'{name} 맞추기')
         g = target_rec
         size = g.get('size', 0.025)
         _set_size(size)
@@ -257,7 +295,7 @@ class Steps:
         line_h = md.wrap(phi + math.pi)
         goal = md.dock_to_odom(D, phi, g['gx'], g['gy'], g['gth'])
         p = self.mv.dk.pose()
-        self.log(f'[주차] D3까지 {self._rel(p, goal, phi)[1] * 100:.1f} cm 후진 (줄 따라가기)')
+        self.log(f'[주차] 도크까지 {self._rel(p, goal, phi)[1] * 100:.1f} cm 후진 (줄 따라가기)')
         t0 = last = time.time()
         v_prev, n_seen, k = 0.0, 0, 0
         while time.time() - t0 < 25.0:
@@ -483,7 +521,151 @@ class Steps:
         self.reach(via, f'{name} 거리', vmax=V_NEAR)
         self.turn(float(cfg.get('turn_deg', TURN_DEG)), name)
         self.park(int(cfg['marker']), _load(f'~/dock_target_{cfg["stop"]}.json'),
-                  _load(f'~/dock_target_{cfg["target"]}.json'))
+                  _load(f'~/dock_target_{cfg["target"]}.json'), name)
+
+    def park_from_line(self, cfg):
+        """도크 줄 가로선(N15 / N16) 위에서 남쪽을 보고 섬 -> 우90 -> 마커로 줄 기록 자세 맞춤 -> 후면 주차"""
+        name = str(cfg['stop']).upper()
+        self.turn(float(cfg.get('turn_deg', TURN_DEG)), name)
+        self.park(int(cfg['marker']), _load(f'~/dock_target_{cfg["stop"]}.json'),
+                  _load(f'~/dock_target_{cfg["target"]}.json'), name)
+
+    def follow_bars(self, names, start, on_pass=None, resume=False):
+        """통로 후진 (남쪽을 보고 북쪽으로): 방향 = 라이다 양옆 벽과 평행, 옆 = 서쪽 벽에서 W_REF.
+        names() -> start 다음부터 지나갈 통로 노드 이름 (달리는 중에 늘어날 수 있음, 마지막 = 설 곳).
+        가로선 노드는 선을 밟는 순간, 거리 노드(P2)는 거리로 on_pass(이름)을 부르고 멈추지 않음.
+        반환 (마지막으로 지난 노드, 이유 bar / dist / p1_dist / none)"""
+        import time
+        ir = self.mv.ir
+        p0 = self.mv.dk.pose()
+        S = np.array(p0[:2])
+        h_c = h0 = p0[2]
+        ms, t_end = [], time.time() + 1.5
+        while time.time() < t_end and len(ms) < 6:
+            q = self.mv.dk.pose()
+            pts = self.lidar.take() if self.lidar else None
+            if pts is not None:
+                fl = side_lines(pts, along=WALL_ALONG_M)
+                angs = [a for (d_, a, n_, e_) in fl.values() if n_ >= WALL_MIN_PTS and e_ < WALL_MAX_STD]
+                if angs and not (len(angs) == 2 and abs(angs[0] - angs[1]) > math.radians(2.0)):
+                    ms.append(md.wrap(q[2] + float(np.mean(angs))))
+            time.sleep(0.03)
+        if len(ms) >= 3:
+            h_c = h0 = math.atan2(np.mean(np.sin(ms)), np.mean(np.cos(ms)))
+            self.mv.dk.rotate_to(h_c)
+            self.log(f'[{start}] 출발 전 벽 기준으로 {math.degrees(md.wrap(h_c - p0[2])):+.1f}° 고침')
+        else:
+            self.log(f'[{start}] 출발 자리에서 벽이 안 보여 지금 방향으로 출발')
+        on_start_bar = bool(ir.get('on'))
+        bars_seen = ir.get('bar_n', 0)
+        seq = list(names())
+        self.log(f'[{start} -> ] 벽과 평행하게 후진: {seq}{" (출발 자리 선 위)" if on_start_bar else ""}')
+        last, i, ref_U, fb_U = start, 0, 0.0, None
+        U = V = bW = 0.0
+        nfix = nskip = k = 0
+        v_prev = 0.0
+        why = 'none'
+        t0 = time.time()
+        while seq and time.time() - t0 < 60.0:
+            tick = time.time()
+            new = list(names())
+            if new != seq:
+                seq = seq[:i] + [n for n in new if n not in seq[:i]]
+                self.log(f'  노드 늘어남: {seq[i:]}')
+            stop = seq[-1]
+            p = self.mv.dk.pose()
+            pts = self.lidar.take() if self.lidar else None
+            if pts is not None:
+                fl = side_lines(pts, along=WALL_ALONG_M)
+                angs = [a for (d_, a, n_, e_) in fl.values() if n_ >= WALL_MIN_PTS and e_ < WALL_MAX_STD]
+                if len(angs) == 2 and abs(angs[0] - angs[1]) > math.radians(2.0):
+                    nskip += 1
+                elif angs:
+                    h_c = md.wrap(h_c + WALL_GAIN * md.wrap(md.wrap(p[2] + float(np.mean(angs))) - h_c))
+                    nfix += 1
+                w_ = fl.get('오른쪽')                       # 남쪽을 보면 오른쪽 = 서쪽 칸막이
+                if w_ and w_[2] >= WALL_MIN_PTS and w_[3] < WALL_MAX_STD and nfix >= 3:
+                    bW += WALL_GAIN * ((W_REF - w_[0]) - V)
+            mdir = h_c + math.pi
+            u = np.array([math.cos(mdir), math.sin(mdir)])
+            n = np.array([-u[1], u[0]])
+            U = float((np.array(p[:2]) - S) @ u)
+            V = float((np.array(p[:2]) - S) @ n) + bW
+            # ---- 노드 판정
+            new_bar = ir.get('bar_n', 0) > bars_seen
+            bars_seen = ir.get('bar_n', 0)
+            if new_bar and on_start_bar and U < START_GUARD_M:
+                new_bar = False
+            if new_bar and fb_U is not None and U - fb_U < RESYNC_M:
+                self.log(f'  (늦게 나온 선: 거리로 친 {last}의 선, {(U - fb_U) * 100:.1f} cm 뒤)')
+                ref_U, fb_U, new_bar = U, None, False
+            done = False
+            while i < len(seq):
+                name = seq[i]
+                kind, gap = BAR_KIND.get(name, 'dist'), BAR_GAP.get(name, 0.30)
+                exp = ref_U + gap
+                early_ok = resume and i == 0
+                if new_bar and kind == 'bar' and U - ref_U < EARLY * gap and not early_ok:
+                    self.log(f'  (너무 이른 선 무시: {name} 예상 {gap * 100:.0f} cm인데 {(U - ref_U) * 100:.1f} cm)')
+                    new_bar = False
+                if new_bar and kind == 'dist' and U < exp - 0.15:
+                    self.log(f'  (너무 이른 선 무시: {name}까지 {(exp - U) * 100:.0f} cm 남음)')
+                    new_bar = False
+                if kind == 'bar':
+                    if new_bar:
+                        self.log(f'[{name} 도착] 가로선, {last}에서 {(U - ref_U) * 100:.1f} cm (예상 {gap * 100:.0f}), 옆 {V * 1000:+.0f} mm')
+                        ref_U, fb_U, new_bar = U, None, False
+                    elif U > exp + MISS_M and name != 'P1':
+                        self.log(f'[{name} 도착] !! 선 못 봄 -> 거리로 ({(U - ref_U) * 100:.1f} cm)')
+                        ref_U, fb_U = U, U
+                    else:
+                        break
+                else:
+                    if U >= exp or new_bar:
+                        self.log(f'[{name} 도착] 거리 {(U - ref_U) * 100:.1f} cm, 옆 {V * 1000:+.0f} mm')
+                        ref_U, fb_U = U, None
+                    else:
+                        break
+                last = name
+                i += 1
+                if on_pass:
+                    on_pass(name)
+                if name == stop:
+                    done = True
+                    why = 'bar' if kind == 'bar' and fb_U is None else 'dist'
+                    break
+            if done:
+                break
+            if stop == 'P1' and i == len(seq) - 1 and U > ref_U + BAR_GAP['P1'] + MISS_M:
+                why = 'p1_dist'                           # P1 선을 못 봄: tape가 더 찾음
+                break
+            nxt = seq[i]
+            left = ref_U + BAR_GAP.get(nxt, 0.30) - U
+            vmax = V_BAR_SLOW if (nxt == stop and (left < SLOW_M or nxt == 'P1')) else FOLLOW_V
+            if nxt == stop and BAR_KIND.get(nxt, 'dist') == 'dist':
+                vmax = min(vmax, 0.02 + 1.5 * max(0.0, left))
+            mot = max(-math.radians(LANE_STEER_DEG), min(math.radians(LANE_STEER_DEG), -math.atan(LANE_K * V)))
+            w = max(-LANE_W_MAX, min(LANE_W_MAX, 2.5 * md.wrap(md.wrap(h_c + mot) - p[2])))
+            v = min(vmax, v_prev + 0.25 / 15)
+            v_prev = v
+            self.mv.send(-v, w)
+            k += 1
+            if k % 15 == 0:
+                self.log(f'  {U * 100:.0f} cm, 벽 방향 고침 {math.degrees(md.wrap(h_c - h0)):+.1f}°, 옆 {V * 1000:+.0f} mm '
+                         f'(벽 맞춤 {nfix}, 버림 {nskip})')
+            time.sleep(max(0.0, 1 / 15 - (time.time() - tick)))
+        else:
+            if seq:
+                self.mv.stop(0.1)
+                raise RuntimeError('통로 후진 시간 초과')
+        self.mv.stop(0.1)
+        self.mv.dk.rotate_to(h_c)
+        if why == 'bar' and sum(self.mv.blacks()) < 3:
+            r, s_, _ = self.mv.drive(0.04, False, h_c, 0.02, event=lambda b, armed, s: sum(b) == 3)
+            self.log(f'  선 지나쳐 앞으로 {s_ * 100:.1f} cm 돌아옴 ({"선 위" if r == "event" else "못 찾음"})')
+        self.log(f'[{last}] 멈춤 ({why}): 출발에서 {U * 100:.1f} cm, 옆 {V * 1000:+.0f} mm, '
+                 f'벽 방향 고침 {math.degrees(md.wrap(h_c - h0)):+.1f}°')
+        return last, why
 
 
 def check(aligns, docks):

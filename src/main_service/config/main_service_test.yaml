@@ -31,9 +31,9 @@ serve_batch_max: 3              # 같은 테이블 주문을 한 번에 싣는 �
 reassign_after_sec: 10          # 적재 전 로봇이 이만큼 고장 · 통신 끊김이면 다른 로봇에 다시 배정
 
 # ---- 도킹 구역 · 대기 배치
-entrance_docks: [D1, D2]        # 입구 쪽 (앞칸부터). 안내는 여기 서 있는 로봇이 한다 (앞칸 로봇부터)
-pickup_docks: [D3, D4]          # 픽업 쪽
-dock_via: {D2: D1}              # 뒤칸: 앞칸. D2(안쪽)는 D1이 비어 있어야 드나든다. 둘 다 비면 D2부터 채운다
+entrance_docks: [D1]            # 입구 쪽. 안내는 여기 서 있는 로봇이 한다 (최종 맵: 입구 도킹 1자리)
+pickup_docks: [D2, D3]          # 픽업 쪽 (주방 아래 구역: D2 = N16 옆, D3 = N15 옆)
+dock_via: {}                    # 뒤칸: 앞칸 (뒤칸은 앞칸이 비어야 드나듦). 최종 맵은 이런 도킹이 없음
 busy_tables: 4                  # 찬 테이블(사용 중 + 안내 중)이 이 수 이상이면 바쁨
 entrance_standby_quiet: 0       # [시험] 입구 대기 배치 안 함
 entrance_standby_busy: 0        # [시험]

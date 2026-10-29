@@ -1,7 +1,7 @@
-"""마커 언도킹 + 회전 + 방향 정렬 (D3/D4 -> N15/N16, 주방 통로 후진 준비)
+"""마커 언도킹 + 회전 + 방향 정렬 (D3/D2 -> N15/N16, 주방 통로 후진 준비)
 
 docking 노드가 부른다:  undock(node, pub, cancelled, tf_buf, cam, req) -> '성공' / '실패: ...'
-  req (precision_stops.yaml의 D4.leave 등):
+  req (precision_stops.yaml의 D3.leave 등):
     marker   : 도크 마커 ID (로봇 앞 벽)
     target   : 나올 자리 이름 -> ~/dock_target_<target>.json   (marker_dock --id <marker> --name <target> --record)
     turn_deg : 나온 뒤 제자리 회전 (+ 왼쪽). 기본 90 (남쪽 보기 = 후진 방향이 북쪽)

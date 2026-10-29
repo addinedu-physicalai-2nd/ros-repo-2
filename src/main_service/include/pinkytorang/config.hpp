@@ -54,9 +54,9 @@ struct Config {
   int reassign_after_sec = 10;   // 적재 전 로봇이 이만큼 고장 · 통신 끊김이면 다른 로봇에 다시 배정
 
   // 도킹 구역
-  std::vector<std::string> entrance_docks = {"D2", "D1"};  // 입구 쪽 (앞칸부터). 안내는 여기 서 있는 로봇만
-  std::vector<std::string> pickup_docks = {"D3", "D4"};    // 픽업 쪽
-  std::map<std::string, std::string> dock_via;              // 뒤칸 -> 앞칸 (D1: D2 = D1은 D2를 지나 드나듦)
+  std::vector<std::string> entrance_docks = {"D1"};        // 입구 쪽 (앞칸부터). 안내는 여기 서 있는 로봇만
+  std::vector<std::string> pickup_docks = {"D2", "D3"};    // 픽업 쪽
+  std::map<std::string, std::string> dock_via;              // 뒤칸 -> 앞칸 (예전 맵 D1: D2 = D1은 D2를 지나 드나듦). 최종 맵은 없음
   double entrance_keep_penalty_m = 1.5; // 서빙 배정 때 입구 로봇에 더하는 비용 (입구 로봇을 아끼려고)
 
   // 대기 배치: 찬 테이블(사용 중 + 안내 중) 수에 따라 입구에 세워 둘 로봇 수. 만석이면 0

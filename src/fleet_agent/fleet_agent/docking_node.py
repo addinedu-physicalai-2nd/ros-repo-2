@@ -2,20 +2,23 @@
 
 fleet_agent <-> docking 인터페이스 (std_msgs/String, JSON)
   /docking/request  {"id", "node", "method": "dock" | "align" | "tape" | "dock_in" | "corridor", ...precision_stops.yaml 값}
-                    fleet_agent가 붙이는 값: corridor(통로 넘겨받기) · travel(축 따라 남은 거리 m) · from_node
-  /docking/result   {"id", "node", "ok": bool, "detail": str}
+                    fleet_agent가 붙이는 값: from_node, corridor는 nodes · then (아래)
+  /docking/result   {"id", "node", "ok": bool, "detail": str, corridor면 "reached": 마지막 노드, "then_done": bool}
   /docking/cancel   {"id"}   -> 바로 멈추고 결과는 보내지 않는다
+  /docking/progress {"id", "node"}            corridor: 가로선(또는 거리)으로 노드를 지날 때마다 (안 섬)
+  /docking/extend   {"id", "nodes", "then"}   corridor: 달리는 중에 서버 APPEND로 길이 늘어남 -> 이어서 감
 
 방법 -> 구현
-  dock  : docking/marker_dock.py  Docker.dock(마커 marker의 목표 파일) -> back(m)만큼 후진   (D1~D4)
+  dock  : docking/marker_dock.py  Docker.dock(마커 marker의 목표 파일) -> back(m)만큼 후진   (D1)
   align : front/axis가 있으면 docking/corridor.py Steps.n14_align                             (N14: 마커 4 -> 우90 -> 5)
           없으면 예전 방식 (markers를 Docker.dock으로 차례로)
   tape  : docking/line_dock.py    LineDocker.run  E자 테이프로 바구니를 픽업대에              (P1)
           corridor=True면 먼저 corridor.follow_walls로 가로선 앞까지 (라이다 벽과 평행하게 후진)
   dock_in : corridor.Steps.dock_in  통로(벽 평행) -> N15 -> 우90 -> 마커로 후면 주차         (통로 쪽 도크)
-  corridor: corridor.follow_walls   축 고정 후진을 벽 평행으로, travel만큼 (중간 노드까지)
+  corridor: corridor.follow_bars    축 고정 후진을 벽 평행으로 nodes 끝까지. 가로선(N15 · N16)마다 progress
+            then = tape(P1) -> LineDocker.run / dock_in(D2 · D3) -> 도크 줄 선에서 Steps.park_from_line
   (leave = 노드를 떠날 때, precision_stops의 <노드>.leave)
-  undock    : docking/undock.py   마커로 나올 자리까지 + 회전 + 방위각 정렬                  (D3/D4 -> N16/N15)
+  undock    : docking/undock.py   마커로 나올 자리까지 + 회전 (+ align 있으면 방위각 정렬)    (D2/D3 -> N16/N15)
   table     : docking/table_dock.py TableDocker.run   다리 마커로 차선 정렬 -> 바닥 정지선            (T1~T6)
   table_exit: docking/table_dock.py TableDocker.leave 서빙 뒤 dist만큼 전진 (그다음 Nav2)
   tape_exit : docking/line_dock.py LineDocker.leave  앞으로 빼서 새 선에서 정지              (P1 -> 그다음 Nav2)
@@ -39,7 +42,7 @@ from std_msgs.msg import String, UInt16MultiArray
 from tf2_ros import Buffer, TransformListener
 
 from .docking import marker_dock as md
-from .docking.corridor import FOLLOW_STOP_EARLY, Lidar, Steps, _load
+from .docking.corridor import BAR_BLACK, FOLLOW_STOP_EARLY, Lidar, Steps, _load, bar_update
 from .docking.line_dock import DEFAULTS, LineDocker, Motion
 from .docking.undock import undock
 from .docking.table_dock import TableDocker
@@ -54,6 +57,8 @@ class DockingNode(Node):
         self.cmd_pub = self.create_publisher(Twist, '/cmd_vel', 10)
         self.create_subscription(String, '/docking/request', self.on_request, reliable)
         self.create_subscription(String, '/docking/cancel', self.on_cancel, reliable)
+        self.progress_pub = self.create_publisher(String, '/docking/progress', reliable)
+        self.create_subscription(String, '/docking/extend', self.on_extend, reliable)
         self.tf_buf = Buffer()
         self.tf_listener = TransformListener(self.tf_buf, self)
         self.ir = {'v': None, 'n': 0}      # 바닥 센서 (tape · tape_exit)
@@ -66,6 +71,8 @@ class DockingNode(Node):
         self.job_start = 0.0
         self.cancel_flag = False
         self.timed_out = False
+        self.plan = None           # corridor: {'nodes', 'then'} (extend로 바뀜)
+        self.info = {}             # 결과에 붙일 값 (corridor reached · then_done)
         self.lock = threading.Lock()
         self.create_timer(0.5, self.watchdog)
         self.get_logger().info('docking 노드 시작')
@@ -81,6 +88,8 @@ class DockingNode(Node):
                 self.publish(req, False, f'다른 정밀 정차 중 ({self.job.get("node")})')
                 return
             self.job = req
+            self.info = {}
+            self.plan = {'nodes': list(req.get('nodes') or []), 'then': req.get('then')}
             self.job_start = time.monotonic()
             self.cancel_flag = False
             self.timed_out = False
@@ -88,8 +97,28 @@ class DockingNode(Node):
         threading.Thread(target=self.run, args=(req,), daemon=True).start()
 
     def on_ir(self, msg):
-        self.ir['v'] = list(msg.data[:3])
+        v = list(msg.data[:3])
+        self.ir['v'] = v
         self.ir['n'] += 1
+        bar_update(self.ir, v)     # 통로 가로선 세기 (corridor)
+
+    def on_extend(self, msg):
+        try:
+            r = json.loads(msg.data)
+        except ValueError:
+            return
+        with self.lock:
+            if self.job is None or r.get('id') != self.job.get('id') or self.job.get('method') != 'corridor':
+                return
+            self.plan = {'nodes': list(r.get('nodes') or []), 'then': r.get('then')}
+            self.job_start = time.monotonic()        # 길이 늘었으니 시간도 새로
+        self.get_logger().info(f'통로 이어 감: {self.plan["nodes"]} then {(r.get("then") or {}).get("method")}')
+
+    def progress(self, node):
+        with self.lock:
+            jid = self.job.get('id') if self.job else None
+        self.progress_pub.publish(String(data=json.dumps({'id': jid, 'node': node})))
+        self.get_logger().info(f'통로 {node} 지남')
 
     def on_cancel(self, msg):
         with self.lock:
@@ -142,13 +171,14 @@ class DockingNode(Node):
 
         with self.lock:
             timed_out = self.timed_out
+            info = dict(self.info)
             self.job = None
         if result is None and not timed_out:
             return  # 취소: 결과 안 보냄
         if timed_out:
-            self.publish(req, True, 'timeout: Nav2 위치 인정')
+            self.publish(req, True, 'timeout: Nav2 위치 인정', info)
         else:
-            self.publish(req, result == '성공', result)
+            self.publish(req, result == '성공', result, info)
 
     def docker(self, marker_id, tag):
         md.load_cam_file()
@@ -189,14 +219,46 @@ class DockingNode(Node):
             cam = None
         else:
             cam = self.docker(int(marker), tag).cam
-        mv = Motion(self, self.cmd_pub, self.cancelled, self.tf_buf, self.ir, dict(DEFAULTS))
+        mv = Motion(self, self.cmd_pub, self.cancelled, self.tf_buf, self.ir, dict(DEFAULTS, ir_black=BAR_BLACK))
         mv.dk.wait_pose()
         return Steps(mv, cam, md.log, self.lidar)
 
+    def corridor_names(self):
+        """지금 계획에서 벽 따라 지나갈 통로 노드 (dock_in이면 도크 바로 앞 줄 노드까지)"""
+        with self.lock:
+            plan = dict(self.plan or {})
+        ns = list(plan.get('nodes') or [])
+        if (plan.get('then') or {}).get('method') == 'dock_in':
+            ns = ns[:-1]
+        return ns
+
     def run_corridor(self, req):
+        """통로: 가로선 따라 후진 (progress) -> [then: tape = P1 삽입 / dock_in = 우90 -> 후면 주차]"""
         st = self.steps(None, f'{req.get("node")}_corridor')
-        st.follow_walls(float(req.get('travel', 0.0)), f'통로 -> {req.get("node")}', stop_early=0.0, stop_on_bar=False)
-        return '성공'
+        start = req.get('from_node', '')
+        names = self.corridor_names()
+        reached, why = st.follow_bars(self.corridor_names, start, on_pass=self.progress, resume=bool(req.get('resume')))
+        with self.lock:
+            plan = dict(self.plan or {})
+            self.info = {'reached': reached, 'then_done': False}
+        then = plan.get('then')
+        names = self.corridor_names()
+        if not then or (names and reached != names[-1]):
+            return '성공'
+        node = (plan.get('nodes') or [reached])[-1]
+        if then.get('method') == 'tape':
+            md.log(f'[{node}] tape: 가로선 -> X -> 시계 90 -> 동 선까지 삽입')
+            result = LineDocker(self, self.cmd_pub, self.cancelled, self.tf_buf, self.ir).run(
+                dict(then, approach=True, approach_max=float(then.get('approach_max', 0.6))))
+        elif then.get('method') == 'dock_in':
+            st = self.steps(int(then['marker']), f'{node}_dock_in')
+            st.park_from_line(then)
+            result = '성공'
+        else:
+            return f'실패: 모르는 then {then.get("method")}'
+        with self.lock:
+            self.info = {'reached': node, 'then_done': True}
+        return result
 
     def run_tape(self, req):
         if req.get('corridor') and float(req.get('travel', 0.0)) > FOLLOW_STOP_EARLY:
@@ -228,8 +290,9 @@ class DockingNode(Node):
         return result
 
     # ------------------------------------------------------------
-    def publish(self, req, ok, detail):
+    def publish(self, req, ok, detail, info=None):
         out = {'id': req.get('id'), 'node': req.get('node'), 'ok': ok, 'detail': detail}
+        out.update(info or {})
         self.result_pub.publish(String(data=json.dumps(out, ensure_ascii=False)))
         self.get_logger().info(f'{req.get("node")} 끝: {detail}')
 

@@ -1,4 +1,5 @@
-# 노드 그래프 v7 (입구 통로 + 홀 테이블 6 + 주방 통로, 도킹 4, 서버가 관리)
+# 노드 그래프 v7.1 (입구 통로 + 홀 테이블 6 + 주방 통로, 도킹 3, 서버가 관리)
+# v7.1: 최종 맵에 맞춰 도킹 이름 정리. 왼쪽 D2 없앰, 오른쪽 위 칸(N16 옆) D3 -> D2, 아래 칸(N15 옆) D4 -> D3
 # 그림: node_map.png
 #
 # ID 규칙: 대문자 1글자 + 번호. 접두어 = 로봇이 거기서 하는 일
@@ -7,11 +8,11 @@
 # 번호 매기는 순서 (v7에서 한 번 정리. 이후로는 다시 매기지 않는다)
 #   N  : 홀 격자는 위 -> 아래 줄, 줄 안에서 왼 -> 오 (N1~N13). 주방 통로는 지나가는 순서 (N14 -> N15 -> N16)
 #   P  : P1 = 픽업 자리, P2 = 그 앞 대기 (지나가는 순서는 P2 -> P1)
-#   T, D : 위 -> 아래, 왼 -> 오 (D1·D2 = 입구 통로 위·아래, D3·D4 = 주방 아래 구역 위·아래)
+#   T, D : 위 -> 아래, 왼 -> 오 (D1 = 입구 통로, D2 · D3 = 주방 아래 구역 위(N16 옆) · 아래(N15 옆))
 #   새 노드는 그 접두어의 다음 번호(N17, D5 ...)로 붙인다. 코드는 ID 글자로 판단하지 않고 필드로 판단한다.
 #
 # 좌표: map 프레임(m). N1~N16, P1, P2 = 실제 로봇으로 찍은 값 (pinkytorang_waypoints.yaml)
-#       T1~T6, D1~D4 = [추정]: 아직 안 찍음. T = 양옆 N의 가운데, D = 옛 좌표 간격을 새 맵 방향으로 옮긴 값
+#       T1~T6, D1~D3 = [추정]: 아직 안 찍음. T = 양옆 N의 가운데, D = 옛 좌표 간격을 새 맵 방향으로 옮긴 값
 #       새 맵은 옛 v7 좌표 기준 약 180도 돌아가 있다 (옛 위쪽 = 새 -y 쪽). yaw도 그만큼 돌렸다
 #       맵을 다시 만들면 좌표도 다시 찍어야 한다.
 #
@@ -22,7 +23,7 @@
 #   lock      : v7은 전부 true
 #   pocket    : true면 차선 옆으로 빠진 정차 자리 (도킹)
 #   entry     : pocket 진입 방향. FORWARD(기본, 전진 진입·후진 출차) / REVERSE(후진 진입·전진 출차)
-#               v7 도킹 D1~D4는 전부 REVERSE: 바구니(뒤)를 벽 쪽에 두고 앞이 통로를 본다
+#               도킹 D1~D3은 전부 REVERSE: 바구니(뒤)를 벽 쪽에 두고 앞이 통로를 본다
 #   yaw       : STOP 노드에서 로봇 "앞"이 보는 방향(rad). PASS 노드의 yaw는 서버가 진행 방향으로 계산한다.
 #               위(+y) 1.5708 / 오른쪽(+x) 0 / 아래(-y) -1.5708 / 왼쪽(-x) 3.1416
 #   next      : 갈 수 있는 다음 노드. 양방향 엣지는 양쪽 노드에 서로 적고, 일방통행은 한쪽에만 적는다.
@@ -54,8 +55,8 @@ nodes:
 
   # ---- 주방 통로 (N14 -> P1 후진 일방통행, 지나가는 순서대로 번호) ----
   - {id: N14, type: PASS, lock: true, x: 0.166, y: 0.381, next: [N15]}   # 통로 입구. 마커 2개로 위치·축 정렬 후 후진 시작 (align)
-  - {id: N15, type: PASS, lock: true, x: 0.190, y: 0.079, next: [N16, D4]}   # D4 출입 축
-  - {id: N16, type: PASS, lock: true, x: 0.212, y: -0.115, next: [P2, D3]}   # D3 출입 축
+  - {id: N15, type: PASS, lock: true, x: 0.190, y: 0.079, next: [N16, D3]}   # D3 출입 축. 바닥 가로선
+  - {id: N16, type: PASS, lock: true, x: 0.212, y: -0.115, next: [P2, D2]}   # D2 출입 축. 바닥 가로선
   - {id: P2, type: STOP, stop_kind: QUEUE, lock: true, x: 0.257, y: -0.597, yaw: 1.640, next: [P1]}   # 픽업 대기 (후진 중이라 앞은 아래)
   - {id: P1, type: STOP, stop_kind: PICKUP, lock: true, x: 0.265, y: -1.041, yaw: 0.069, next: [N4]}   # 픽업. 테이프로 뒤(바구니)를 주방 픽업대에 넣음 (tape). P1 -> N4 일방통행
 
@@ -68,10 +69,9 @@ nodes:
   - {id: T6, type: STOP, stop_kind: SERVE, table: T6, lock: true, x: 0.727, y: -0.079, next: [N9, N10]}  # [추정]
 
   # ---- 도킹 (후진 진입·전진 출차, 앞은 통로 쪽 = 왼쪽, 바구니는 벽 쪽) ----
-  - {id: D1, type: STOP, stop_kind: DOCK, pocket: true, entry: REVERSE, lock: true, x: 1.721, y: 0.179, yaw: 0.069, next: [N1, D2]}   # [추정] 입구 통로 위 칸. D2로 가려면 D1 자리를 지나간다 (통로 폭이 로봇 한 대)
-  - {id: D2, type: STOP, stop_kind: DOCK, pocket: true, entry: REVERSE, lock: true, x: 1.711, y: 0.323, yaw: 0.069, next: [D1]}   # [추정] 입구 통로 아래 칸 (키오스크 위). 둘 다 비면 D2부터 채운다
-  - {id: D3, type: STOP, stop_kind: DOCK, pocket: true, entry: REVERSE, lock: true, x: 0.068, y: -0.125, yaw: 0.069, next: [N16]}   # [추정] 주방 아래 구역 위 칸
-  - {id: D4, type: STOP, stop_kind: DOCK, pocket: true, entry: REVERSE, lock: true, x: 0.046, y: 0.069, yaw: 0.069, next: [N15]}   # [추정] 주방 아래 구역 아래 칸 (칸막이 위)
+  - {id: D1, type: STOP, stop_kind: DOCK, pocket: true, entry: REVERSE, lock: true, x: 1.721, y: 0.179, yaw: 0.069, next: [N1]}   # [추정] 입구 통로 (마커 1 · 6)
+  - {id: D2, type: STOP, stop_kind: DOCK, pocket: true, entry: REVERSE, lock: true, x: 0.068, y: -0.125, yaw: 0.069, next: [N16]}   # [추정] 주방 아래 구역 위 칸 (N16 옆, 마커 2)
+  - {id: D3, type: STOP, stop_kind: DOCK, pocket: true, entry: REVERSE, lock: true, x: 0.046, y: 0.069, yaw: 0.069, next: [N15]}   # [추정] 주방 아래 구역 아래 칸 (N15 옆, 마커 3)
 
 # 후진 구간. [A, B, C] = A->B, B->C 엣지를 후진으로만 간다. 첫 노드와 끝 노드는 lock 노드 (회전하는 곳).
 reverse:

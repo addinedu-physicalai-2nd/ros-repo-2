@@ -181,7 +181,7 @@ std::vector<std::string> MapManager::nodesOfKind(const std::string& kind) const 
 
 // 경로 위 a -> b를 후진으로 가는지 (fleet_msgs README 4.5 · 4.9)
 //   1. reverse 구간에 적힌 길: 후진
-//   2. 경로의 목적지(goal)가 pocket이면 마지막 길은 그 pocket의 entry 방향 (D1~D4 = REVERSE, 바구니부터)
+//   2. 경로의 목적지(goal)가 pocket이면 마지막 길은 그 pocket의 entry 방향 (D1~D3 = REVERSE, 바구니부터)
 //   3. 경로의 출발지(start)가 pocket이면 첫 길은 entry의 반대 (REVERSE로 들어간 도킹은 전진으로 나옴)
 //   4. 나머지 (지나가기만 하는 pocket 포함, 예: D2로 가며 지나는 D1): 전진
 bool MapManager::driveReverse(const std::string& a, const std::string& b, const std::string& start,

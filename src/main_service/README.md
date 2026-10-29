@@ -45,7 +45,7 @@ C++17 · ROS 2 Jazzy. 로봇 3대가 **서빙**(주방 → 테이블)과 **안�
   - 서로 기다리는 교착이면 바로 우회, 우회 길도 없으면 한 대가 옆 칸으로 비켜 줌
 - **후진 (fleet_msgs `Move.drive`)**: Move 하나에는 방향 하나. 규칙은 아래 맵 설명 참고. 나뉜 뒤쪽 Move는 같은 cmd_id로 APPEND
   - 예: `Move(REPLACE, FORWARD, [N16, N12])` + `Move(APPEND, REVERSE, [N13])` → 로봇은 N12에서 멈추고 돌아서 후진
-  - 픽업 쪽 도킹 D3 · D4는 후진으로 들어가고 전진으로 나온다
+  - 픽업 쪽 도킹 D2 · D3은 후진으로 들어가고 전진으로 나온다
   - 후진 중 PASS 노드의 yaw는 진행 방향 + 180°
 - **테이블 자리(pocket)에는 한 번에 한 대**: 그 테이블로 가는 로봇이 있거나 테이블 노드 lock이 잡혀 있으면, 서빙 · 안내 모두 기다린다 (나가는 로봇 ↔ 들어오는 로봇 교착 방지).
 - **배터리**: 위 스케줄링 참고. 충전할 로봇은 입구 도킹을 쓰지 않는다. `min_battery_pct: 0`이면 검사 안 함.
@@ -82,7 +82,7 @@ WebSocket: `/ws/store` (snapshot에 `tables`, 로봇 `charging` 포함), `/ws/cu
 - ros-repo-2에 올릴 때는 설정의 `node_graph`를 `../../fleet_msgs/docs/node_graph.yaml`로 바꿔 복사 없이 읽고, `web_root`는 `../../../web`
 - 좌표는 SLAM 맵 `fleet_msgs/docs/maps/project_map_v2` 기준 map 프레임. 맵이 바뀌면 fleet_msgs 쪽만 고치면 된다
 - 홀 격자 N1~N13 (위 → 아래 줄, 왼 → 오), 테이블 T1~T6, 전부 양방향 1차선
-- 입구 통로: N1 → D1(앞칸) → D2(안쪽) 한 줄. 둘 다 비면 D2부터 채우고, D2 로봇은 D1이 비어야 나온다 (`dock_via: {D2: D1}`)
+- 입구 통로: N1 → D1 (v7.1부터 입구 도킹은 D1 하나, `dock_via: {}`). 예전 맵은 D1(앞칸) → D2(안쪽) 한 줄이라 `dock_via: {D2: D1}`
 - 주방 통로: N13 → N14 → N15 → N16 → P2(대기) → P1(픽업) → N4 일방통행, **N14부터 P1까지 후진**(`reverse`)
 - 전진 / 후진 · Move 나누기 (`MapManager::driveReverse`, fleet_msgs README 4.5 · 4.9). **노드 그래프를 읽고 Move로 바꾸는 기준 구현은 main_service 하나**
   - `reverse` 구간: 후진 / 목적지 pocket으로 들어가는 길: entry 방향 / 출발 pocket에서 나오는 길: entry 반대 / 나머지(지나가는 pocket 포함): 전진

@@ -370,7 +370,7 @@ def test_d4_leave_undock_axis_reverse_tape_then_tape_exit():
                    'leave': {'method': 'undock', 'to': 'N15', 'hold_axis': True}}
     stops['P1'] = {'method': 'tape', 'leave': {'method': 'tape_exit', 'quiet_to_next': True}}
     r = LeaveRobot(3.548, 1.550, math.pi)
-    d = Driver(r, stops, reverse=ReverseControl(speed=0.1), policy=BlockPolicy())
+    d = Driver(r, stops, reverse=ReverseControl(speed=0.1), policy=BlockPolicy(), corridor=False)   # 통로 넘겨받기 끔 (예전 tape_approach)
     r.driver = d
     d.last_node, d.leave_from, d.last_drive = 'D4', 'D4', REVERSE
     d.on_move(70, False, FORWARD, [('N15', 3.398, 1.550, -1.5708)])
@@ -402,7 +402,7 @@ def test_d4_flow_with_goal_node_v9():
                    'leave': {'method': 'undock', 'to': 'N15', 'hold_axis': True}}
     stops['P1'] = {'method': 'tape', 'leave': {'method': 'tape_exit', 'quiet_to_next': True}}
     r = LeaveRobot(3.548, 1.550, math.pi)
-    d = Driver(r, stops, reverse=ReverseControl(speed=0.1), policy=BlockPolicy())
+    d = Driver(r, stops, reverse=ReverseControl(speed=0.1), policy=BlockPolicy(), corridor=False)   # 통로 넘겨받기 끔 (예전 tape_approach)
     r.driver = d
     d.last_node, d.leave_from, d.last_drive = 'D4', 'D4', REVERSE
     d.on_move(70, False, FORWARD, [('N15', 3.398, 1.550, -1.5708)], False, 'P1')
@@ -455,36 +455,73 @@ def test_guide_goal_skips_precision_and_plays_arrive():
 # ---------------------------------------------------------------- 통로 넘겨받기 (corridor_approach)
 CORR_STOPS = dict(STOPS)
 CORR_STOPS['N14'] = {'method': 'align', 'front': 'n14e', 'axis': 'n14s', 'hold_axis': True}
-CORR_STOPS['D4'] = {'method': 'dock_in', 'marker': 3, 'stop': 'n15', 'target': 'd3', 'via': 'n15s',
-                    'leave': {'method': 'undock', 'to': 'N15', 'hold_axis': True}}
-CORR_STOPS['P1'] = {'method': 'tape', 'leave': {'method': 'tape_exit', 'quiet_to_next': True}}
+CORR_STOPS['D3'] = {'method': 'dock_in', 'marker': 3, 'stop': 'n15', 'target': 'd3', 'timeout': 70,
+                    'leave': {'method': 'undock', 'marker': 3, 'target': 'n15', 'to': 'N15', 'turn_deg': 90,
+                              'hold_axis': True}}
+CORR_STOPS['P1'] = {'method': 'tape', 'timeout': 60, 'leave': {'method': 'tape_exit', 'quiet_to_next': True}}
 NODES = {'N13': (3.023, 1.200), 'N14': (3.398, 1.200), 'N15': (3.398, 1.550), 'N16': (3.398, 1.750),
-         'P2': (3.398, 2.100), 'P1': (3.398, 2.600), 'D4': (3.548, 1.550)}
+         'P2': (3.398, 2.100), 'P1': (3.398, 2.600), 'D3': (3.548, 1.550)}
+NEXT = {'N14': 'N15', 'N15': 'N16', 'N16': 'P2', 'P2': 'P1'}
 
 
 class CorridorRobot(FakeRobot):
-    """docking 흉내: align은 남쪽(축)을 보게 살짝 틀어 두고, corridor / tape / dock_in은 그 노드로 옮겨 놓는다"""
+    """docking 흉내: align은 남쪽(축)을 보게 살짝 틀어 두고, corridor는 nodes를 STEP마다 하나씩 지나며
+    progress (마지막 노드는 결과). extend로 늘어난 nodes는 결과를 정하기 전까지만 받음 (그 뒤는 늦은 것)"""
+    STEP = 6
 
     def __init__(self, *a):
         super().__init__(*a)
         self.reqs = []
+        self.extends = []
         self.teleport = None
+        self.corr = None
 
     def precision(self, req):
-        super().precision(req)
         self.reqs.append(dict(req))
         m, n = req['method'], req['node']
+        if m == 'corridor':
+            self.prec.append(n + ':corridor')
+            self.corr = {'nodes': list(req['nodes']), 'then': req.get('then'), 'i': 0, 'k': 0, 'final': None}
+            return
+        super().precision(req)
         if m == 'align':
             self.teleport = (self.x, self.y, -math.pi / 2 + 0.06)        # 마커로 맞춘 축 (지도와 3.4° 다름)
-        elif m in ('corridor', 'dock_in'):
-            self.teleport = NODES[n] + (self.yaw,)
-        elif m == 'tape' and req.get('corridor'):
-            self.teleport = (3.398, 2.640, self.yaw)
+        elif m == 'undock':
+            self.teleport = NODES[req['to']] + (-math.pi / 2,)
+
+    def precision_extend(self, req):
+        self.extends.append(dict(req))
+        if self.corr and self.corr['final'] is None:
+            self.corr['nodes'], self.corr['then'] = list(req['nodes']), req.get('then')
+
+    def precision_cancel(self):
+        super().precision_cancel()
+        self.corr = None
 
     def step(self, dt):
         if self.prec_pending and self.prec_wait <= 0 and self.teleport:
             self.x, self.y, self.yaw = self.teleport
             self.teleport = None
+        c = self.corr
+        if c:
+            c['k'] += 1
+            if c['final'] is not None:               # 결과 보내는 중 (늦게 온 extend는 못 받음)
+                if c['k'] >= 2:
+                    self.corr = None
+                    then = c['then']
+                    node = c['nodes'][c['final']]
+                    if then:
+                        self.prec.append(node + ':' + then['method'])
+                    self.driver.on_precision_result(True, 'fake', {'reached': node, 'then_done': bool(then)})
+            elif c['k'] >= self.STEP:
+                c['k'] = 0
+                node = c['nodes'][c['i']]
+                self.x, self.y = NODES[node]
+                if c['i'] == len(c['nodes']) - 1:
+                    c['final'] = c['i']
+                else:
+                    self.driver.on_precision_progress(node)
+                    c['i'] += 1
         super().step(dt)
 
 
@@ -500,16 +537,39 @@ def wp(*names, yaw=-1.5708):
     return [(n,) + NODES[n] + (yaw,) for n in names]
 
 
-def test_corridor_n13_to_p1_handover_after_n14_align():
-    # N13 -> N14 (Nav2) 정렬 -> 축 그대로, 통로 전체(N15 N16 P2 P1)를 docking에 맡김 (벽 따라 후진 + tape)
+def server(r, d, cmd, goal, delay=0):
+    """서버 흉내 (lock_lookahead 2): NODE_REACHED가 올 때마다 delay tick 뒤 다음 노드를 APPEND REVERSE"""
+    st = {'seen': 0, 'todo': []}
+
+    def hook(t):
+        ev = [n for tt, n, _ in r.events if tt == NODE_REACHED]
+        for n in ev[st['seen']:]:
+            nxt = NEXT.get(NEXT.get(n, ''), '')          # 이미 1칸 앞은 보냄 -> 2칸 앞
+            if goal == 'D3' and n == 'N14':
+                nxt = 'D3'
+            if nxt and (goal != 'D3' or nxt == 'D3') and ORDER.index(nxt) <= ORDER.index(goal):
+                st['todo'].append([delay, nxt])
+        st['seen'] = len(ev)
+        for item in st['todo']:
+            item[0] -= 1
+        for item in [x for x in st['todo'] if x[0] < 0]:
+            st['todo'].remove(item)
+            d.on_move(cmd, True, REVERSE, wp(item[1], yaw=3.1416 if item[1] == 'D3' else -1.5708), False, goal)
+    return hook
+
+
+ORDER = ['N14', 'N15', 'N16', 'P2', 'P1', 'D3']
+
+
+def test_corridor_n13_to_p1_bars_no_stop():
+    # N13 -> N14 정렬 -> 통로 docking 한 번. 가로선마다 progress -> NODE_REACHED -> 서버 APPEND -> extend (안 섬)
     r, d = corr_make()
     d.on_move(80, False, FORWARD, wp('N14', yaw=0.0), False, 'P1')
-    d.on_move(80, True, REVERSE, wp('N15', 'N16', 'P2', 'P1'), False, 'P1')
-    run(r, d, 40)
-    assert r.prec == ['N14:align', 'P1:tape']
-    req = r.reqs[1]
-    assert req['corridor'] and req['approach'] and req['from_node'] == 'N14'
-    assert abs(req['travel'] - 1.40) < 0.05              # N14 -> P1 축 따라 (지도)
+    d.on_move(80, True, REVERSE, wp('N15'), False, 'P1')
+    run(r, d, 40, hook=server(r, d, 80, 'P1'))
+    assert r.prec == ['N14:align', 'N16:corridor', 'P1:tape']       # 통로 요청은 한 번 (N16까지 받은 상태), 끝에 tape
+    assert r.reqs[1]['from_node'] == 'N14' and r.reqs[1]['then'] is None
+    assert r.extends[-1]['nodes'] == ['N15', 'N16', 'P2', 'P1'] and r.extends[-1]['then']['method'] == 'tape'
     assert reached(r) == ['N14', 'N15', 'N16', 'P2', 'P1']
     assert [n for t, n, _ in r.events if t == CMD_DONE] == ['P1']
     assert abs(wrap(r.yaw - (-math.pi / 2 + 0.06))) < 0.02   # N14에서 맞춘 축: 출발 회전 · P1 yaw 회전 안 함
@@ -517,36 +577,66 @@ def test_corridor_n13_to_p1_handover_after_n14_align():
     assert d.leave_from == 'P1'
 
 
-def test_corridor_n13_to_d4_dock_in():
+def test_corridor_n13_to_d3_dock_in():
     r, d = corr_make()
-    d.on_move(81, False, FORWARD, wp('N14', yaw=0.0), False, 'D4')
-    d.on_move(81, True, REVERSE, wp('N15') + wp('D4', yaw=3.1416), False, 'D4')
-    run(r, d, 40)
-    assert r.prec == ['N14:align', 'D4:dock_in']
-    req = r.reqs[1]
-    assert req['corridor'] and req['marker'] == 3 and req['stop'] == 'n15' and req['target'] == 'd3'
-    assert abs(req['travel'] - 0.35) < 0.05              # 옆으로 비킨 도크는 그 줄(N15)까지
-    assert reached(r) == ['N14', 'N15', 'D4']
-    assert [n for t, n, _ in r.events if t == CMD_DONE] == ['D4']
-    assert d.leave_from == 'D4'
+    d.on_move(81, False, FORWARD, wp('N14', yaw=0.0), False, 'D3')
+    d.on_move(81, True, REVERSE, wp('N15'), False, 'D3')
+    run(r, d, 40, hook=server(r, d, 81, 'D3'))
+    assert r.prec == ['N14:align', 'D3:corridor', 'D3:dock_in']    # N14 도착 때 서버가 D3을 바로 붙임
+    assert r.reqs[1]['nodes'] == ['N15', 'D3'] and r.reqs[1]['then']['marker'] == 3
+    assert reached(r) == ['N14', 'N15', 'D3']
+    assert [n for t, n, _ in r.events if t == CMD_DONE] == ['D3']
+    assert d.leave_from == 'D3'
 
 
-def test_corridor_partial_path_then_append():
-    # lock 때문에 서버가 N16까지만 보냄 (도착지 P1) -> N16까지 벽 따라가기(corridor)만, CMD_DONE
-    # -> 다음 Move(P2 P1)는 N16에서 이어서 tape까지 맡김
+def test_corridor_late_extend_requeues():
+    # 서버 APPEND가 늦어 docking이 N16에서 결과를 이미 정함 -> P2는 큐로 돌려 N16에서 다시 넘겨받기
     r, d = corr_make()
     d.on_move(82, False, FORWARD, wp('N14', yaw=0.0), False, 'P1')
     d.on_move(82, True, REVERSE, wp('N15', 'N16'), False, 'P1')
+    st = {'done': False}
+
+    def hook(t):
+        ev = [n for tt, n, _ in r.events if tt == NODE_REACHED]
+        if not st['done'] and r.corr and r.corr['final'] is not None and r.corr['nodes'][-1] == 'N16':
+            st['done'] = True
+            d.on_move(82, True, REVERSE, wp('P2', 'P1'), False, 'P1')
+        return ev
+    run(r, d, 50, hook=hook)
+    assert r.prec == ['N14:align', 'N16:corridor', 'P1:corridor', 'P1:tape']
+    assert r.reqs[-1]['from_node'] == 'N16' and r.reqs[-1]['nodes'] == ['P2', 'P1']
+    assert reached(r) == ['N14', 'N15', 'N16', 'P2', 'P1']
+    assert [n for tt, n, _ in r.events if tt == CMD_DONE] == ['P1']
+
+
+def test_corridor_partial_path_then_new_move():
+    # lock 때문에 서버가 N16까지만 보냄 (도착지 P1) -> N16 선에서 섬, CMD_DONE -> 다음 Move(P2 P1)는 N16에서 이어서
+    r, d = corr_make()
+    d.on_move(83, False, FORWARD, wp('N14', yaw=0.0), False, 'P1')
+    d.on_move(83, True, REVERSE, wp('N15', 'N16'), False, 'P1')
     t = run(r, d, 30)
     assert r.prec == ['N14:align', 'N16:corridor']
     assert reached(r) == ['N14', 'N15', 'N16']
     assert [n for tt, n, _ in r.events if tt == CMD_DONE] == ['N16']
-    d.on_move(83, False, REVERSE, wp('P2', 'P1'), False, 'P1')
+    d.on_move(84, False, REVERSE, wp('P2', 'P1'), False, 'P1')
     run(r, d, 30, t0=t)
-    assert r.prec == ['N14:align', 'N16:corridor', 'P1:tape']
-    assert r.reqs[-1]['from_node'] == 'N16' and abs(r.reqs[-1]['travel'] - 0.85) < 0.05
+    assert r.prec == ['N14:align', 'N16:corridor', 'P1:corridor', 'P1:tape']
+    assert r.reqs[-1]['from_node'] == 'N16' and r.reqs[-1]['then']['method'] == 'tape'
     assert reached(r) == ['N14', 'N15', 'N16', 'P2', 'P1']
     assert [n for tt, n, _ in r.events if tt == CMD_DONE] == ['N16', 'P1']
+
+
+def test_corridor_d3_undock_to_p1():
+    # D3 빠지기(undock -> N15, 축) -> N15 선 위에서 통로 docking -> P1
+    r, d = corr_make()
+    r.x, r.y, r.yaw = NODES['D3'] + (3.1416,)
+    d.last_node, d.leave_from, d.last_drive = 'D3', 'D3', REVERSE
+    d.on_move(85, False, REVERSE, wp('N15', 'N16'), False, 'P1')
+    run(r, d, 40, hook=server(r, d, 85, 'P1'))
+    assert r.prec == ['D3:undock', 'N16:corridor', 'P1:tape']
+    assert r.reqs[1]['from_node'] == 'N15' and r.reqs[1]['nodes'] == ['N16']
+    assert reached(r) == ['N15', 'N16', 'P2', 'P1']
+    assert [n for t, n, _ in r.events if t == CMD_DONE] == ['P1']
 
 
 def test_corridor_old_n14_align_keeps_turn():

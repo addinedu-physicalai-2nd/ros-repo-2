@@ -1,6 +1,6 @@
 <!--
   로봇 한 대 전체 시작: bringup -> Nav2(맵) -> 초기 위치 -> fleet_agent
-    ros2 launch fleet_agent robot_system.launch.xml robot_id:=pinky2 start_node:=D2
+    ros2 launch fleet_agent robot_system.launch.xml robot_id:=pinky2 start_node:=D3
 
   ROS_DOMAIN_ID는 미리 export (pinky1=51, pinky2=52, pinky3=53)
 
