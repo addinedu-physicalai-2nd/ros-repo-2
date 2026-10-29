@@ -178,6 +178,14 @@ class FleetAgent(Node):
         tr = t.transform.translation
         return tr.x, tr.y, quat_to_yaw(t.transform.rotation)
 
+    def odom_yaw(self):
+        """odom 기준 방향 (축 고정 후진의 방향 유지용. AMCL 보정이 안 섞임). 없으면 None"""
+        try:
+            t = self.tf.lookup_transform('odom', self.base_frame, Time(), timeout=Duration(seconds=0.0))
+        except Exception:
+            return None
+        return quat_to_yaw(t.transform.rotation)
+
     # ================================================================ Driver io
     def nav_go(self, x, y, yaw):
         if not self.nav.wait_for_server(timeout_sec=0.5):

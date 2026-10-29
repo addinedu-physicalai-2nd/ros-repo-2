@@ -11,6 +11,7 @@ E자 테이프 (지도 방향: 북쪽 위, 픽업대 오른쪽)
         ┗━━━━━━┻━━━━━━┛         <- 가로선 (복도를 가로지름)
                ┃                <- 메인선 (복도, 있어도 됨)
   run  : 남쪽을 보고 북쪽으로 후진 -> 가로선(검검검) -> x_after 더 -> 시계 90도 -> 동쪽으로 후진
+         (approach=True: Driver가 P1 좌표까지 안 가고 P2에서 바로 맡김 -> 가로선까지 v_approach로)
          -> 동 선(검검검, insert_arm 뒤)에서 정지 = 바구니가 픽업대 위
   leave: 서쪽으로 전진 -> 흰색 본 뒤 검검검을 exit_legs번째(기본 2 = 새 선)에서 정지
 
@@ -25,7 +26,9 @@ from .marker_dock import Cancelled, Docker, clamp, wrap
 DEFAULTS = {
     'ir_black': 2000,        # 이보다 크면 검정
     'confirm': 2,            # 새 센서 값이 연속 이만큼 맞아야 인정
-    'search_max': 0.30,      # P1 도착 뒤 가로선 찾을 최대 후진 (P1 좌표는 가로선보다 조금 앞에 둔다)
+    'search_max': 0.30,      # P1 좌표에 선 뒤 가로선 찾을 최대 후진 (축 고정이 아닐 때)
+    'approach_max': 1.20,    # 축 고정 후진으로 바로 맡았을 때(P2 -> 가로선) 최대 후진. 못 찾으면 정지
+    'v_approach': 0.08,      # 그때 속도 (가로선 감지 뒤 밀린 만큼은 X에서 보정)
     'x_after': 0.035,        # 가로선 감지 후 더 후진 (바구니 높이 맞춤)
     'insert_arm': 0.06,      # 삽입: 이만큼 간 뒤의 검검검만 (서 선 지나가는 것 무시)
     'insert_max': 0.20,
@@ -130,7 +133,9 @@ class LineDocker:
         """P1: 가로선 찾기 -> X -> 시계 90도 -> 동 선까지 후진 (바구니 삽입)"""
         mv, c = self._motion(req)
         h = mv.dk.pose()[2]                       # 지금 방향 = 복도 축 (남쪽을 봄, 북쪽으로 후진)
-        why, s, pe = mv.drive(c['search_max'], True, h, c['v_search'],
+        far = bool(req.get('approach'))
+        why, s, pe = mv.drive(c['approach_max'] if far else c['search_max'], True, h,
+                              c['v_approach'] if far else c['v_search'],
                               event=lambda b, armed: sum(b) == 3)   # 가로선 = 검검검 (메인선은 1~2개)
         if why != 'event':
             return f'실패: 가로선을 {s * 100:.0f} cm 안에서 못 찾음'

@@ -113,15 +113,17 @@ class ReverseControl:
         v = -min(self.speed, max(0.02, d)) * math.cos(err)
         return v, w, False
 
-    def command_axis(self, pose, target, axis):
-        """축 고정 후진: 로봇 앞 방향을 axis로 유지하고, 축 위로 잰 남은 거리만 본다 -> (v, w, done)
-        (마커로 맞춘 축을 Nav2 좌표 쪽으로 다시 꺾지 않게. 좌우 위치는 축이 정한다)"""
+    def command_axis(self, pose, target, axis, heading_err=None):
+        """축 고정 후진: 로봇 앞 방향을 축으로 유지하고, 축 위로 잰 남은 거리만 본다 -> (v, w, done)
+        (마커로 맞춘 축을 Nav2 좌표 쪽으로 다시 꺾지 않게. 좌우 위치는 축이 정한다)
+        heading_err: 방향 오차를 odom으로 잰 값 (AMCL이 고칠 때마다 꺾이지 않게). 없으면 맵 yaw로"""
         x, y, yaw = pose
         b = axis + math.pi                      # 뒤로 가는 방향
         remain = (target[0] - x) * math.cos(b) + (target[1] - y) * math.sin(b)
         if remain < self.tol:
             return 0.0, 0.0, True
-        w = clamp(self.k_ang * wrap(axis - yaw), self.max_w)
+        err = heading_err if heading_err is not None else wrap(axis - yaw)
+        w = clamp(self.k_ang * err, self.max_w)
         return -min(self.speed, max(0.02, remain)), w, False
 
 
@@ -247,6 +249,9 @@ class Driver:
         docking에 맡긴다. 예) D4 leave=undock: 마커로 N15까지 나와 돌고 정렬 -> to 노드(N15) 도착으로 침
                               P1 leave=tape_exit: 테이프 선까지 앞으로 빼고 -> 그다음 Nav2
         hold_axis: 맞춘 방향을 축으로 이어지는 후진을 그 축 그대로 (출발 회전 · 끝 노드 yaw 회전 생략)
+                   방향은 odom으로 유지 (io.odom_yaw가 있으면). 맵(AMCL) 보정에 따라 꺾이지 않는다
+      - 축 고정 후진으로 tape 노드(P1)에 갈 때는 좌표까지 가지 않고 tape에 바로 맡긴다 (tape_approach):
+        tape가 바닥 가로선을 보며 후진해 멈추고 삽입까지 -> NODE_REACHED · CMD_DONE (좌표가 조금 틀려도 됨)
     안내 (Move.guide != OFF): 서버는 "안내 중"만 알려 주고, 나머지는 로봇이 판단한다
       - 인사 : 안내가 아닌 상태에서 안내 Move를 처음 받으면, 떠나기 전에 Guide 'greet' (앞 카메라로 손님 기다림)
       - 확인 : 꺾이는 노드(들어온 방향과 나갈 방향이 check_turn 넘게 다름)에서 멈춤 -> 뒤로 돎 -> Guide 'watch'
@@ -296,6 +301,8 @@ class Driver:
         self.leave_req = None
         self.prec_ok = True
         self.axis = None              # 축 고정 후진 방향 (leave hold_axis로 정함, FORWARD 출발 때 해제)
+        self.axis_odom = None         # 같은 축을 odom yaw로 (방향 유지는 이것으로)
+        self.prec_done_node = ''      # tape_approach로 정밀 정차를 이미 끝낸 노드
         self.skip_turn = False        # 다음 방향 바뀜 회전 생략 (축을 이미 맞춤)
 
     # ------------------------------------------------------------ 입력
@@ -345,7 +352,7 @@ class Driver:
             self.nav_state = 'ok' if ok else 'fail'
 
     def on_precision_result(self, ok, detail=''):
-        if self.phase in ('align', 'precision', 'leave') and self.prec_state == 'running':
+        if self.phase in ('align', 'precision', 'leave', 'tape_approach') and self.prec_state == 'running':
             self.prec_state = 'ok'
             self.prec_ok = ok
             if not ok:
@@ -377,7 +384,7 @@ class Driver:
         self.now = now
         if pose is None or self.paused or self.error:
             return
-        moving = self.phase in ('nav', 'reverse')
+        moving = self.phase in ('nav', 'reverse', 'tape_approach')
         if moving or self.holding:
             ask, report = self.policy.update(now, self.obstacle)
             if self.obstacle:
@@ -421,7 +428,9 @@ class Driver:
             self._tick_nav(pose)
         elif self.phase == 'reverse':
             if self.axis is not None:
-                v, w, done = self.rev.command_axis(pose, (self.cur.x, self.cur.y), self.axis)
+                oy = self._odom_yaw()
+                err = wrap(self.axis_odom - oy) if (oy is not None and self.axis_odom is not None) else None
+                v, w, done = self.rev.command_axis(pose, (self.cur.x, self.cur.y), self.axis, err)
             else:
                 v, w, done = self.rev.command(pose, (self.cur.x, self.cur.y), self.seg_start)
             if done:
@@ -444,12 +453,18 @@ class Driver:
                 req, self.leave_req = self.leave_req or {}, None
                 if self.prec_ok and req.get('hold_axis'):
                     self.axis = pose[2]
+                    self.axis_odom = self._odom_yaw()
                     self.skip_turn = True
                 if self.prec_ok and req.get('to') == self.cur.node_id:
                     self.io.log(f'{req.get("node")} {req.get("method")} -> {self.cur.node_id} 도착')
                     self._reached(pose)
                 else:
                     self._depart(pose)
+        elif self.phase == 'tape_approach':
+            if self.prec_state == 'ok':
+                self.prec_state = ''
+                self.prec_done_node = self.cur.node_id
+                self._reached(pose)
         elif self.phase == 'grace':
             if len(self.queue):
                 self._start_next(pose)
@@ -517,6 +532,7 @@ class Driver:
         self.seg_start = (pose[0], pose[1])
         if self.cur.drive == FORWARD:
             self.axis = None
+            self.axis_odom = None
             self.skip_turn = False
             self.phase = 'nav'  # nav_go 결과가 바로 와도 받을 수 있게 먼저
             self.nav_state = 'running'
@@ -524,6 +540,15 @@ class Driver:
             self.io.direction('FORWARD')
             self.io.nav_go(self.cur.x, self.cur.y, self.cur.yaw)
         else:
+            stop = self.stops.get(self.cur.node_id, {})
+            if self.axis is not None and stop.get('method') == 'tape' and stop.get('approach', True):
+                # 축 고정 후진으로 테이프 노드: 좌표 대신 바닥 가로선으로 멈추게 tape에 바로 맡김
+                self.io.cmd_vel(0.0, 0.0)  # 여기서부터 /cmd_vel은 docking(tape)이 씀
+                self.phase = 'tape_approach'
+                self.prec_state = 'running'
+                self.io.direction('REVERSE')
+                self.io.precision(dict(stop, node=self.cur.node_id, approach=True))
+                return
             self.phase = 'reverse'
             self.io.direction('REVERSE')
 
@@ -535,6 +560,9 @@ class Driver:
             self.io.nav_go(self.cur.x, self.cur.y, self.cur.yaw)
         elif self.phase == 'precision' or self.phase == 'align':
             self._request_precision(self.phase == 'align')
+        elif self.phase == 'tape_approach':
+            self.prec_state = 'running'
+            self.io.precision(dict(self.stops.get(self.cur.node_id, {}), node=self.cur.node_id, approach=True))
         elif self.phase == 'leave' and self.leave_req:
             self.prec_state = 'running'
             self.io.precision(self.leave_req)
@@ -584,6 +612,10 @@ class Driver:
         self._precision_or_done()
 
     def _precision_or_done(self):
+        if self.prec_done_node and self.prec_done_node == self.cur.node_id:
+            self.prec_done_node = ''      # tape_approach에서 이미 함
+            self._done()
+            return
         stop = self.stops.get(self.cur.node_id)
         if stop and stop['method'] in ('dock', 'tape'):
             self.phase = 'precision'
@@ -607,6 +639,13 @@ class Driver:
         self.io.direction('STOP')
         if self.cur.guide == GUIDE_END:
             self.io.guide({'action': 'arrive', 'node': self.cur.node_id})  # 도착 효과 (기다리지 않음)
+
+    def _odom_yaw(self):
+        f = getattr(self.io, 'odom_yaw', None)
+        try:
+            return f() if f else None
+        except Exception:
+            return None
 
     # ------------------------------------------------------------ 안내
     def _is_check(self, step, nxt):
@@ -671,7 +710,7 @@ class Driver:
     def _stop_motion(self, keep=False, keep_dir=False):
         self.io.cmd_vel(0.0, 0.0)
         self.io.nav_cancel()
-        if self.phase in ('align', 'precision', 'leave'):
+        if self.phase in ('align', 'precision', 'leave', 'tape_approach'):
             self.io.precision_cancel()
         if self.phase in ('guide_greet', 'guide_watch'):
             self.io.guide_cancel()

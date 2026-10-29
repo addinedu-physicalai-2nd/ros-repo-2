@@ -352,6 +352,9 @@ class LeaveRobot(FakeRobot):
         super().precision(req)
         if req['method'] == 'undock':
             self.teleport = (3.398, 1.550, -math.pi / 2 + 0.05)   # 마커로 맞춘 축 (지도와 약간 다름)
+        if req['method'] == 'tape' and req.get('approach'):
+            self.approach_seen = True
+            self.teleport = (3.398, 2.640, self.yaw)              # tape가 가로선까지 (좌표보다 4 cm 더)
 
     def step(self, dt):
         fired = self.prec_pending and self.prec_wait <= 0
@@ -379,7 +382,8 @@ def test_d4_leave_undock_axis_reverse_tape_then_tape_exit():
     assert reached(r) == ['N15', 'P2', 'P1']
     assert [n for tt, n, _ in r.events if tt == CMD_DONE] == ['P1']
     assert abs(wrap(r.yaw - (-math.pi / 2 + 0.05))) < 0.05   # 축 그대로 (출발 회전 · P1 yaw 회전 안 함)
-    assert abs(r.y - 2.600) < 0.04
+    assert getattr(r, 'approach_seen', False)          # P2 -> P1은 좌표 대신 tape가 가로선으로
+    assert abs(r.y - 2.640) < 0.01
     d.on_move(71, False, FORWARD, [('N4', 3.0, 2.6, 3.1416)])
     run(r, d, 20, t0=t)
     assert r.prec == ['D4:undock', 'P1:tape', 'P1:tape_exit']   # P1을 떠날 때 테이프 빼기 먼저
