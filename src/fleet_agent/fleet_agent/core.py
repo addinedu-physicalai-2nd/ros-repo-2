@@ -600,7 +600,7 @@ class Driver:
                 self.nav_tries += 1
                 self.io.log(f'Nav2 실패: {self.cur.node_id} -> 다시 시도 ({self.nav_tries}/{self.nav_retries})')
                 self.nav_state = 'running'
-                self.io.nav_go(self.cur.x, self.cur.y, self.cur.yaw)
+                self.io.nav_go(self.cur.x, self.cur.y, self._nav_yaw())
                 return
             self.io.log(f'Nav2 실패: {self.cur.node_id}')
             self.io.event(CMD_FAILED, self.queue.cmd_id, self.cur.node_id, 'nav2_failed')
@@ -693,7 +693,7 @@ class Driver:
             self.nav_state = 'running'
             self.nav_tries = 0
             self.io.direction('FORWARD')
-            self.io.nav_go(self.cur.x, self.cur.y, self.cur.yaw)
+            self.io.nav_go(self.cur.x, self.cur.y, self._nav_yaw())
         else:
             if self.axis is not None and self.corridor and self._corridor_handover(pose):
                 return
@@ -715,7 +715,7 @@ class Driver:
             return
         if self.phase == 'nav':
             self.nav_state = 'running'
-            self.io.nav_go(self.cur.x, self.cur.y, self.cur.yaw)
+            self.io.nav_go(self.cur.x, self.cur.y, self._nav_yaw())
         elif self.phase == 'precision' or self.phase == 'align':
             self._request_precision(self.phase == 'align')
         elif self.phase == 'tape_approach':
@@ -803,6 +803,16 @@ class Driver:
     def _precise_here(self, step):
         """정밀 정차(dock · tape)를 할 곳인가: 도착지이고 안내가 아닐 때 (안내는 Nav2 위치 · yaw로만 섬)"""
         return self._at_goal(step) and not step.guide
+
+    def _nav_yaw(self):
+        """Nav2 목표 yaw: 다음이 정밀 정차할 테이블(도착지)이고 precision_stops에 face(테이블 모서리)가 있으면
+        그 점을 바라봄 (마커가 바로 앞에 오게). 아니면 서버가 준 yaw (다음 노드 쪽)"""
+        nxt = self.queue.steps[0] if len(self.queue) else None
+        if self._table_next(nxt):
+            f = self.stops.get(nxt.node_id, {}).get('face')
+            if f:
+                return math.atan2(float(f[1]) - self.cur.y, float(f[0]) - self.cur.x)
+        return self.cur.yaw
 
     def _table_next(self, nxt):
         """다음 step이 정밀 정차할 테이블(도착지)인가 -> 그 앞 노드는 통과하지 말고 끝까지 가서 선다"""

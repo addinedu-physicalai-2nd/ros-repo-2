@@ -716,6 +716,33 @@ def test_table_from_node_then_table_exit():
     assert navs[-1] == (1.018, -0.903) and reached(r)[-1] == 'N3'
 
 
+def test_table_from_node_faces_table_edge():
+    # T1 face(테이블 모서리)가 있으면 N2 Nav2 목표 yaw = N2 -> face 쪽 (서버 yaw 대신). 지나가기만 할 땐 서버 yaw
+    stops = dict(STOPS)
+    stops['T1'] = {'method': 'table', 'face': [1.217, -0.929],
+                   'from': {'N2': {'marker': 11, 'target': 't1l'}}}
+    r = FakeRobot(1.5, -0.5, -math.pi / 2)
+    d = Driver(r, stops, reverse=ReverseControl(speed=0.1), policy=BlockPolicy())
+    r.driver = d
+    d.last_drive = FORWARD
+    yaws = []
+    nav_go = r.nav_go
+    r.nav_go = lambda x, y, yaw: (yaws.append(yaw), nav_go(x, y, yaw))
+    d.on_move(8, False, FORWARD, [('N2', 1.456, -0.821, 3.12), ('T1', 1.193, -0.812, 3.12)], False, 'T1')
+    run(r, d, 20)
+    assert abs(yaws[0] - math.atan2(-0.929 + 0.821, 1.217 - 1.456)) < 1e-6
+    assert r.prec == ['T1:table']
+    r2, d2 = make(1.5, -0.5, -math.pi / 2, last_drive=FORWARD)
+    d2.stops = stops
+    yaws2 = []
+    nav_go2 = r2.nav_go
+    r2.nav_go = lambda x, y, yaw: (yaws2.append(yaw), nav_go2(x, y, yaw))
+    d2.on_move(9, False, FORWARD, [('N2', 1.456, -0.821, 3.12), ('T1', 1.193, -0.812, 3.12),
+                                  ('N3', 0.979, -0.815, 3.12)], False, 'N3')
+    run(r2, d2, 25)
+    assert yaws2[0] == 3.12 and r2.prec == []
+
+
 def test_table_pass_through_when_not_goal():
     # T1이 도착지가 아니면(지나가기만) N2에서 멈추지 않고 table도 안 함
     stops = dict(STOPS)

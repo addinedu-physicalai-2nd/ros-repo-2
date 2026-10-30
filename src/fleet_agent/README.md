@@ -163,7 +163,7 @@ CMD_DONE 바로 앞에, undock / entrance_exit(빠지기)가 끝나면 `UNDOCKED
 
 ## 한 번에 켜기 (robot_system.launch.xml)
 
-bringup -> (2초) Nav2(맵 pinkytorang_map_v5, 설정 config4: 둘 다 레포) -> 초기 위치 + fleet_agent 를 한 명령으로 켠다.
+bringup -> (2초) Nav2(맵 pinkytorang_map_v5, 설정 nav_v5: 둘 다 레포) -> 초기 위치 + fleet_agent 를 한 명령으로 켠다.
 ```bash
 export ROS_DOMAIN_ID=52
 ros2 launch fleet_agent robot_system.launch.xml robot_id:=pinky2 start_node:=D2
@@ -171,7 +171,7 @@ ros2 launch fleet_agent robot_system.launch.xml robot_id:=pinky2 start_node:=D2
 - 초기 위치: `initial_pose`가 node_graph.yaml의 start_node 좌표 · yaw로 /initialpose를 보낸다 (RViz 2D Pose Estimate 대신).
   D 좌표가 안 맞으면 `set_initial_pose:=false`로 끄고 RViz로 맞춘다
 - 맵 · Nav2 설정 바꾸기: `map:=... params_file:=...`
-  (기본 `fleet_msgs/docs/maps/pinkytorang_map_v5.yaml`, `fleet_agent/params/config4.yaml`. 바꾸면 커밋 · push 후 로봇에서 pull + fbuild)
+  (기본 `fleet_msgs/docs/maps/pinkytorang_map_v5.yaml`, `fleet_agent/params/nav_v5.yaml`. 바꾸면 커밋 · push 후 로봇에서 pull + fbuild)
 - Nav2에서 tf 에러가 계속 나면 `nav_delay:=5`
 - 도킹 없이 N 노드에서 시험: `start_yaw:=<rad>`(로봇 앞 방향), `spin_deg:=360`(초기 위치 뒤 제자리 한 바퀴로 AMCL 맞춤)
   서버는 `main_service_test.yaml`로 켠다 (켤 때 노드에서 대기, 작업 끝나면 거기로 돌아감)
@@ -181,7 +181,8 @@ ros2 launch fleet_agent robot_system.launch.xml robot_id:=pinky2 start_node:=D2
 | 파일 | 내용 |
 |---|---|
 | `fleet_msgs/docs/maps/pinkytorang_map_v5.pgm/.yaml` | SLAM 맵 2.5 cm (100 × 81칸, 약 2.5 × 2.0 m). 서버 · 로봇 공용. 노드 좌표(`node_graph.yaml`)는 이 맵 기준 |
-| `fleet_agent/params/config4.yaml` | Nav2 설정: costmap 2.5 cm, footprint 뒤 -0.14 m(바구니), 라이다 0.15 m 안 무시, 직진 0.11 m/s, inflation 0.12 m |
+| `fleet_agent/params/nav_v5.yaml` | **Nav2 기본.** config4 기반 튜닝 (바꾼 줄 `# v5:`): 서는 노드 5 cm · 6°, 라이다 차선 가운데로(inflation 0.15 · 5), 제자리 회전 23° 넘으면, local costmap 1 m 2D, AMCL 파티클 1000 · sigma 0.1, A* |
+| `fleet_agent/params/config4.yaml` | 예전 Nav2 설정 (되돌리기용): costmap 2.5 cm, footprint 뒤 -0.14 m(바구니), 라이다 0.15 m 안 무시, 직진 0.11 m/s, inflation 0.12 m |
 | `fleet_agent/params/mapper_small.yaml` | 매핑(slam_toolbox) 설정: 2.5 cm, 레이저 4 m, 0.2 m · 0.2 rad마다 스캔 |
 
 다시 매핑 (pinky2, 시작 자리를 정해 두고 같은 자리에서. 바구니는 떼고)
@@ -225,7 +226,11 @@ ros2 run fleet_agent node_tour                     # 기본: 홀 N1 -> N13 지�
 ros2 run fleet_agent node_tour N1 N4 N13 N11 N1    # 목표 노드만 적으면 사이 노드는 길 찾기로 채움
 ros2 run fleet_agent node_tour --step 2 N1 N4 N1   # 목표마다 멈춰 2초 쉬고
 ros2 run fleet_agent node_tour --loops 3
+ros2 run fleet_agent node_tour --tables            # 테이블 앞 노드(N2~N10)마다 서서 가장 가까운 테이블 모서리(face)를 봄
+ros2 run fleet_agent node_tour --tables all        # 그 노드가 맡은 테이블 모두 (N3 = T2, T1)
 ```
+테이블: 노드 T1~T6은 차선 위 점(지나가는 길), 바라볼 테이블 모서리는 `precision_stops.yaml` T의 `face`.
+테이블이 도착지면 fleet_agent가 직전 노드(N2 · N3 …)에서 face 쪽을 보고 서서 docking table에 넘긴다 (`core._nav_yaw`).
 노드마다 걸린 시간 · 도착 때 위치 오차(TF vs 노드 좌표)를 찍고, 끝나면 표로 정리한다. Ctrl+C = 멈추고 결과 출력.
 후진 구간 · 도킹 · 픽업은 목표로 적지 않으면 안 지나간다 (전진 주행만).
 

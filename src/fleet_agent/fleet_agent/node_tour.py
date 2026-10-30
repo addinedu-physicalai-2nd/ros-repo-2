@@ -7,6 +7,11 @@ fleet_agent에 /fleet/move를 직접 보내고 /fleet/event를 받아서, 노드
   ros2 run fleet_agent node_tour N1 N4 N13 N11 N1   # 지나갈 노드를 직접 (사이 노드는 길 찾기로 채움)
   ros2 run fleet_agent node_tour --step 2 N1 N4 N1  # 목표 노드마다 멈춰 2초 쉬고 다음으로
   ros2 run fleet_agent node_tour --loops 3          # 같은 코스 3번
+  ros2 run fleet_agent node_tour --tables           # 테이블 앞 노드(N2~N10)마다 서서 가장 가까운 테이블 모서리를 봄
+  ros2 run fleet_agent node_tour --tables all       # 그 노드가 맡은 테이블 모두 (N3 = T1, T2 차례로)
+
+  --tables: 테이블 모서리 = precision_stops.yaml T의 face (fleet_agent가 테이블 도착지일 때 직전 노드에서 보는 점).
+            그 노드에서 다리를 끊고 마지막 yaw = 모서리 쪽으로 보내서, 도착 뒤 방향 오차를 잰다
 
   - 후진 구간(node_graph reverse)과 도킹 노드는 목표로 적지 않으면 지나가지 않는다 (전진 주행만 시험)
   - 지나가는 노드의 yaw = 다음 노드 쪽, 마지막 노드 = node_graph에 yaw가 있으면 그 값, 없으면 들어온 방향
@@ -71,10 +76,11 @@ def heading(n1, n2):
 
 
 class Tour(Node):
-    def __init__(self, graph, legs, step_sec):
+    def __init__(self, graph, legs, step_sec, faces=None):
         super().__init__('node_tour')
         self.g = graph
         self.legs = legs          # [[노드, ...], ...] 한 다리 = Move 하나
+        self.faces = faces or {}  # {다리 index: (테이블, yaw)} 다리 끝에서 테이블 모서리를 봄
         self.step_sec = step_sec
         rel = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE)
         self.pub = self.create_publisher(Move, '/fleet/move', rel)
@@ -108,6 +114,8 @@ class Tour(Node):
             w.node_id, w.x, w.y = nid, float(n['x']), float(n['y'])
             if i + 1 < len(nodes):
                 w.yaw = heading(n, self.g.nodes[nodes[i + 1]])
+            elif self.leg in self.faces:
+                w.yaw = float(self.faces[self.leg][1])
             elif 'yaw' in n:
                 w.yaw = float(n['yaw'])
             elif i > 0:
@@ -144,6 +152,13 @@ class Tour(Node):
             self.t_node = now
         elif e.type == RobotEvent.CMD_DONE:
             self.get_logger().info(f'  다리 끝 {e.node_id} ({now - self.t_leg:.1f}초)')
+            if self.leg in self.faces:
+                table, want = self.faces[self.leg]
+                p = self.pose()
+                dyaw = float('nan') if p is None else math.degrees(
+                    abs(math.atan2(math.sin(p[2] - want), math.cos(p[2] - want))))
+                self.rows.append((f'{e.node_id}>{table}', now - self.t_leg, float('nan'), dyaw))
+                self.get_logger().info(f'  {e.node_id} -> {table} 모서리 보기: 방향 오차 {dyaw:.1f}°')
             if self.step_sec > 0 and self.leg + 1 < len(self.legs):
                 self.wait_until = now + self.step_sec
             else:
@@ -173,10 +188,14 @@ class Tour(Node):
         print(f'{"노드":6s}{"초":>7s}{"위치오차cm":>12s}{"방향오차deg":>13s}')
         for nid, sec, err, dyaw in self.rows:
             d = '' if math.isnan(dyaw) else f'{dyaw:.0f}'
-            print(f'{nid:6s}{sec:7.1f}{err * 100:12.1f}{d:>13s}')
+            e = '-' if math.isnan(err) else f'{err * 100:.1f}'
+            print(f'{nid:7s}{sec:7.1f}{e:>12s}{d:>13s}')
         errs = [r[2] for r in self.rows if not math.isnan(r[2])]
         if errs:
-            print(f'도착 {len(self.rows)}개, 평균 오차 {sum(errs) / len(errs) * 100:.1f}cm, 최대 {max(errs) * 100:.1f}cm')
+            print(f'도착 {len(errs)}개, 평균 오차 {sum(errs) / len(errs) * 100:.1f}cm, 최대 {max(errs) * 100:.1f}cm')
+        faces = [r[3] for r in self.rows if '>' in r[0] and not math.isnan(r[3])]
+        if faces:
+            print(f'테이블 보기 {len(faces)}번, 방향 오차 평균 {sum(faces) / len(faces):.1f}°, 최대 {max(faces):.1f}°')
         print('결과: ' + (f'실패 ({self.failed})' if self.failed else '끝까지 완료'))
 
 
@@ -187,10 +206,28 @@ def main():
     ap.add_argument('--step', type=float, default=0.0, help='목표 노드마다 멈춰 쉴 초 (0 = 안 멈추고 한 번에)')
     ap.add_argument('--loops', type=int, default=1)
     ap.add_argument('--graph', default='', help='node_graph.yaml (기본: fleet_msgs share/docs)')
+    ap.add_argument('--tables', nargs='?', const='near', choices=['near', 'all'], default=None,
+                    help='테이블 앞 노드마다 서서 테이블 모서리(precision_stops face) 보기: near(가장 가까운) / all')
+    ap.add_argument('--stops', default='', help='precision_stops.yaml (기본: fleet_msgs share/docs)')
     a = ap.parse_args(argv)
 
-    path = a.graph or os.path.join(get_package_share_directory('fleet_msgs'), 'docs', 'node_graph.yaml')
+    docs = os.path.join(get_package_share_directory('fleet_msgs'), 'docs')
+    path = a.graph or os.path.join(docs, 'node_graph.yaml')
     g = Graph(path)
+    face_at = {}    # {N: [(테이블, (x, y)), ...] 가까운 순}
+    if a.tables:
+        with open(a.stops or os.path.join(docs, 'precision_stops.yaml'), encoding='utf-8') as f:
+            stops = yaml.safe_load(f) or {}
+        for t, cfg in stops.items():
+            if isinstance(cfg, dict) and cfg.get('method') == 'table' and cfg.get('face'):
+                for n in (cfg.get('from') or {}):
+                    face_at.setdefault(str(n), []).append((str(t), tuple(map(float, cfg['face']))))
+        if not face_at:
+            sys.exit('precision_stops.yaml에 face 있는 테이블이 없음')
+        for n, lst in face_at.items():
+            lst.sort(key=lambda tf: math.hypot(tf[1][0] - g.nodes[n]['x'], tf[1][1] - g.nodes[n]['y']))
+            if a.tables == 'near':
+                del lst[1:]
     route = (a.route or DEFAULT_ROUTE) * max(1, a.loops)
     bad = [n for n in route if n not in g.nodes]
     if bad:
@@ -209,9 +246,28 @@ def main():
     if a.step <= 0:
         legs.append(cur)
 
+    faces = {}
+    if face_at:   # 테이블 앞 노드에서 다리를 끊고, 그 자리에서 테이블 모서리마다 한 다리씩 (제자리 회전)
+        split = []
+        for leg in legs:
+            cur = [leg[0]]
+            for nid in leg[1:]:
+                cur.append(nid)
+                if nid in face_at:
+                    for k, (t, (fx, fy)) in enumerate(face_at[nid]):
+                        n = g.nodes[nid]
+                        faces[len(split)] = (t, math.atan2(fy - n['y'], fx - n['x']))
+                        split.append(cur if k == 0 else [nid])
+                    cur = [nid]
+            if len(cur) > 1:
+                split.append(cur)
+        legs = split
+
     rclpy.init(signal_handler_options=SignalHandlerOptions.NO)   # Ctrl+C 때 멈춤 명령을 보내고 끝내려고
-    node = Tour(g, legs, a.step)
+    node = Tour(g, legs, a.step, faces)
     print('코스:', ' -> '.join(route))
+    if faces:
+        print('테이블 보기:', ', '.join(f'{legs[i][-1]}->{t}' for i, (t, _) in sorted(faces.items())))
     print('로봇이 시작 노드', route[0], '위에 있어야 한다 (멀면 처음 노드로 먼저 간다). Ctrl+C = 멈추고 결과 출력')
     time.sleep(1.0)               # fleet_agent 구독 연결 기다림
     node.send_leg()
