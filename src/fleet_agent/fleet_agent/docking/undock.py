@@ -22,6 +22,7 @@ import time
 import numpy as np
 
 from . import marker_dock as md
+from . import records
 from .line_dock import DEFAULTS, Motion
 
 V_UNDOCK = 0.10
@@ -76,7 +77,7 @@ def undock(node, pub, cancelled, tf_buf, cam, req):
     mv = Motion(node, pub, cancelled, tf_buf, None, dict(DEFAULTS))
     mv.dk.wait_pose()
     marker = int(req['marker'])
-    path = os.path.expanduser(f'~/dock_target_{req["target"]}.json')
+    path = records.find(f'dock_target_{req["target"]}.json')
     with open(path) as f:
         g = json.load(f)
     try:
@@ -116,7 +117,7 @@ def undock(node, pub, cancelled, tf_buf, cam, req):
         # ---- 4. 방향 정렬 (방위각)
         name = req.get('align')
         if name:
-            with open(os.path.expanduser(f'~/align_{name}.json')) as f:
+            with open(records.find(f'align_{name}.json')) as f:
                 ref = json.load(f)
             _set_size(ref.get('size', 0.025))
             cam.id = ref['id']

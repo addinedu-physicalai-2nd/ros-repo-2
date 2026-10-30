@@ -18,6 +18,7 @@ import os
 import numpy as np
 
 from fleet_agent.docking import marker_dock as md
+from fleet_agent.docking import records
 
 
 def bearing(m):
@@ -37,7 +38,7 @@ def main():
     ap.add_argument('--record', action='store_true')
     ap.add_argument('--dry-run', action='store_true')
     args, _ = ap.parse_known_args()
-    path = os.path.expanduser(f'~/align_{args.name}.json')
+    path = records.save_path(f'align_{args.name}.json')
     md.load_cam_file()
     if args.record:
         if args.id is None:

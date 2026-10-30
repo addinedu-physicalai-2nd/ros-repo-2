@@ -53,6 +53,10 @@ odom은 bringup이 내보내는 TF odom -> base_footprint 를 읽는다.
 로그: ~/dock_logs/<시각>_<모드>_v4/
 중간에 멈추기: Ctrl+C (로봇 즉시 정지)
 """
+try:
+    from . import records
+except ImportError:                       # 파일을 바로 python3로 돌릴 때
+    import records
 import argparse
 import datetime
 import json
@@ -69,7 +73,7 @@ WIDTH, HEIGHT = 640, 480
 FX_DEFAULT = 500.0          # --calibrate 결과가 있으면 그 값을 쓴다
 ROTATE_180 = True
 CAM_X_M = 0.035             # URDF: base_link -> 카메라 앞쪽 0.020 + 0.015
-CAM_FILE = os.path.expanduser('~/dock_cam.json')
+CAM_FILE = records.cam_file()      # 레포 records/cam/<hostname>.json (없으면 ~/dock_cam.json)
 
 # ---- 측정 ----
 MEASURE_FRAMES = 10         # 멈춘 상태에서는 매 장이 거의 같아서 많이 찍을 필요 없음 (v4.1 로그: 흔들림 0.1~0.5도)
@@ -124,14 +128,15 @@ set_fx(FX_DEFAULT)
 
 
 def load_cam_file():
-    """(v4.3) ~/dock_cam.json의 FX 읽기. 없으면 기본값"""
-    if os.path.exists(CAM_FILE):
-        with open(CAM_FILE) as f:
+    """(v4.3) 카메라 보정 FX 읽기 (records.cam_file: 레포 cam/<hostname>.json -> ~/dock_cam.json). 없으면 기본값"""
+    path = records.cam_file()
+    if os.path.exists(path):
+        with open(path) as f:
             set_fx(json.load(f)['fx'])
 
 
 def target_file_of(marker_id):
-    return os.path.expanduser(f'~/dock_target_id{marker_id}.json')
+    return records.find(f'dock_target_id{marker_id}.json')
 
 
 def open_log(tag):
@@ -457,9 +462,10 @@ class Docker:
             f'-> FX {FX:.1f} -> {fx:.1f}')
         if not 300 < fx < 900:
             return f'실패: 보정값 {fx:.0f}이 이상함 (저장 안 함)'
-        with open(CAM_FILE, 'w') as f:
+        path = records.cam_file(write=True)
+        with open(path, 'w') as f:
             json.dump({'fx': fx}, f, indent=2)
-        return f'보정 저장: FX {fx:.1f} -> {CAM_FILE}. 이후 --record를 다시 하세요'
+        return f'보정 저장: FX {fx:.1f} -> {path} (레포에 커밋 · push)'
 
     def record(self, target_file):
         """지금 위치를 도킹 목표로 저장 -> 결과 문구"""
@@ -599,7 +605,8 @@ def main():
     ap.add_argument('--calibrate', action='store_true', help='odom으로 카메라 거리 보정 (마커 정면 25~35 cm)')
     ap.add_argument('--dry-run', action='store_true', help='바퀴를 움직이지 않고 계획만 출력')
     args, _ = ap.parse_known_args()   # ros2 run 이 붙이는 --ros-args는 무시
-    target_file = os.path.expanduser(f'~/dock_target_{args.name}.json') if args.name else target_file_of(args.id)
+    fname = f'dock_target_{args.name}.json' if args.name else f'dock_target_id{args.id}.json'
+    target_file = records.save_path(fname) if args.record else records.find(fname)
 
     tag = 'record' if args.record else 'calib' if args.calibrate else 'dry' if args.dry_run else 'run'
     open_log(tag)

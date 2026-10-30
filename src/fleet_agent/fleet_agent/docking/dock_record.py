@@ -22,7 +22,7 @@ import math
 import os
 
 from . import marker_dock as md
-from . import entrance
+from . import entrance, records
 from .corridor import Lidar, Steps, _save, align_record, bearing, check, side_lines
 from .line_dock import DEFAULTS, Motion
 from .undock import _set_size
@@ -114,7 +114,7 @@ def main():
             if m is None:
                 result = f'실패: 마커 {args.id}가 안 보임'
             else:
-                path = os.path.expanduser(f'~/align_{args.name}.json')
+                path = records.save_path(f'align_{args.name}.json')
                 _save(path, align_record(args.id, args.size, m))
                 result = (f'저장: 거리 {m["tz"] * 100:.1f} cm, 방위각 {math.degrees(bearing(m)):+.2f}°, '
                           f'기울기 {math.degrees(m["yaw"]):+.1f}° -> {path}')

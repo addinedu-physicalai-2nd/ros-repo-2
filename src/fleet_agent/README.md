@@ -79,7 +79,7 @@
 
 마커 준비 (로봇마다, fleet_agent는 끄고. 카메라를 docking 노드가 쥐고 있어서):
 ```bash
-ros2 run fleet_agent marker_dock --calibrate          # 처음 한 번: 카메라 거리 보정 -> ~/dock_cam.json
+ros2 run fleet_agent marker_dock --calibrate          # 로봇마다 처음 한 번: 카메라 거리 보정 -> records/cam/<hostname>.json
 ros2 run fleet_agent marker_dock --record --id 3      # 도킹 자리마다: 로봇을 최종 위치에 두고 -> ~/dock_target_id3.json
 ros2 run fleet_agent marker_dock --dry-run --id 3     # 계획만 보기
 ```
@@ -118,14 +118,15 @@ E자 테이프 (지도 방향, 북쪽 위 · 픽업대 오른쪽)
 
 준비 (로봇마다 한 번, fleet_agent는 끄고 bringup + 바닥 센서만)
 ```bash
-ros2 run fleet_agent marker_dock --calibrate     # 카메라 보정 (처음 한 번) -> ~/dock_cam.json
+ros2 run fleet_agent marker_dock --calibrate     # 카메라 보정 (로봇마다 처음 한 번) -> records/cam/<hostname>.json
 ros2 run fleet_agent dock_record all             # 로봇을 D3 칸에 손으로 반듯하게 넣고: 로봇이 직접
                                                  #   d3 · n15 · n15s · n14s · n14e 를 벽과 수직으로 맞추고 찍음
 ros2 run fleet_agent dock_record dock --dock d2  # D2 칸에 손으로: d2 · n16 · n16s. 끝 자세(남쪽)에서 N16 가로선을 센서 밑에
 ros2 run fleet_agent dock_record check           # 확인 (n15와 d3 차이 0이어야 함, --dock d2도)
 ros2 run fleet_agent dock_record scan            # (필요하면) 지금 자리에서 라이다로 양옆 벽이 보이나
 ```
-기록 파일 형식: `fleet_msgs/docs/record_json_format.md`. 마커를 다시 붙이거나 벽을 옮기면 다시 기록한다.
+기록 파일은 레포 `src/fleet_agent/records/`에 저장되고 모든 로봇이 거기서 읽는다 (`records/README.md`, 형식: `fleet_msgs/docs/record_json_format.md`).
+다시 찍으면 `git status`에 바뀐 json이 보이니 커밋 · push. 마커를 다시 붙이거나 벽을 옮기면 다시 기록한다.
 
 켜기
 ```bash

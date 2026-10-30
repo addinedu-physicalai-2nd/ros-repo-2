@@ -30,6 +30,7 @@ import os
 import numpy as np
 
 from . import marker_dock as md
+from . import records
 from .undock import _set_size
 
 TURN_DEG = -90.0      # N14 · N15에서 오른쪽으로
@@ -81,13 +82,17 @@ def bearing(m):
 
 
 def _load(path):
-    with open(os.path.expanduser(path)) as f:
+    """기록 읽기: 파일 이름만 보고 레포 records/에서 (docking/records.py). '~/'는 예전 표기라 무시"""
+    with open(records.find(path)) as f:
         return json.load(f)
 
 
 def _save(path, d):
-    with open(os.path.expanduser(path), 'w') as f:
+    """기록 쓰기: 레포 소스 records/ (커밋 · push하면 모든 로봇이 같이 씀)"""
+    p = records.save_path(path)
+    with open(p, 'w') as f:
         json.dump(d, f, indent=2)
+    md.log(f'  기록 저장 -> {p}')
 
 
 def bar_update(ir, v):

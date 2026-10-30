@@ -31,6 +31,7 @@ import time
 import numpy as np
 
 from . import marker_dock as md
+from . import records
 from .line_dock import DEFAULTS as LINE_DEFAULTS, Motion
 from .undock import _set_size
 
@@ -168,9 +169,9 @@ class TableDocker:
 
     def _load_target(self, f):
         name = f.get('target') or default_name(f['marker'])
-        path = os.path.expanduser(f'~/dock_target_{name}.json')
+        path = records.find(f'dock_target_{name}.json')                 # 레포 records/ (docking/records.py)
         if not os.path.exists(path):
-            old = os.path.expanduser(f'~/table_target_id{int(f["marker"])}.json')   # table_align 예전 이름
+            old = records.find(f'table_target_id{int(f["marker"])}.json')   # table_align 예전 이름
             if os.path.exists(old):
                 md.log(f'주의: {path} 없음 -> 예전 이름 {old} 사용')
                 path = old

@@ -14,6 +14,8 @@ setup(
         ('share/' + package_name + '/launch', glob('launch/*.launch.xml')),
         ('share/' + package_name + '/config', glob('config/*.yaml')),
         ('share/' + package_name + '/models', glob('models/*.pt')),   # 안내 손님 확인 YOLO (best.pt)
+        ('share/' + package_name + '/records', glob('records/*.json') + ['records/README.md']),   # 기록 (모든 로봇 공통)
+        ('share/' + package_name + '/records/cam', glob('records/cam/*.json')),                  # 카메라 보정 (hostname별)
     ],
     install_requires=['setuptools'],
     zip_safe=True,
