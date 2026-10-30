@@ -26,7 +26,8 @@
 | `fleet_agent/docking/undock.py` | (모듈) | undock: 통로 쪽 도크에서 마커로 N15/N16까지 + 좌90 (그다음 통로 넘겨받기, 방향은 라이다 벽) |
 | `fleet_agent/docking/marker_align.py` | (`marker_align` 실행) | 정렬 기준 저장 (`--record`) · 시험 |
 | `fleet_agent/docking/corridor.py` | (모듈) | 주방 통로: N14 정렬(마커 4 → 우90 → 5), 라이다 벽 따라 후진 + 바닥 가로선(N15 · N16)마다 진행 알림, 도크 후면 주차 |
-| `fleet_agent/docking/dock_record.py` | (`dock_record` 실행) | 통로 · 도크 기록을 로봇이 직접 (`all` / `dock` / `align` / `check` / `scan`) |
+| `fleet_agent/docking/entrance.py` | (모듈) | 입구 D1 (안내 로봇 자리): N1 → 통로 가운데 → 마커 6 · 1 교점 → 곧게 후진 / 빠지기: 교점에서 북쪽 |
+| `fleet_agent/docking/dock_record.py` | (`dock_record` 실행) | 통로 · 도크 기록을 로봇이 직접 (`all` / `dock` / `d1` / `align` / `check` / `scan`) |
 
 ## 노드 사이 인터페이스 (로봇 안, std_msgs/String JSON)
 
@@ -67,7 +68,8 @@
 
 | method | 노드 | 구현 |
 |---|---|---|
-| `dock` | D1 | `marker_dock.Docker.dock()` (마커 `marker`의 목표 파일로) → `back` m 후진 |
+| `dock` | (예전 방식) | `marker_dock.Docker.dock()` (마커 `marker`의 목표 파일로) → `back` m 후진 |
+| `entrance` | D1 | N1에서 D1 쪽을 보고 통째로 (`entrance.Entrance.dock`). leave `entrance_exit`: 교점까지 나와 북쪽 → Nav2로 N1 |
 | `align` | N14 | `front`/`axis`가 있으면 `corridor.Steps.n14_align` (마커 4 → 우90 → 마커 5 벽면 수직). 없으면 예전 `markers` 방식 |
 | `tape` | P1 | `line_dock.LineDocker.run()` — E자 테이프: 가로선 → X → 시계 90° → 동 선까지 후진. 통로로 오면 `corridor`의 `then` |
 | `dock_in` | D2 · D3 (통로 쪽 도크) | 통로로 오면 `corridor`의 `then`: 도크 줄 가로선(N16 · N15)에서 섬 → `Steps.park_from_line` (우90 → 마커 2(3)으로 줄 자세 → 후면 주차) |
@@ -134,6 +136,29 @@ ros2 launch fleet_agent robot_system.launch.xml robot_id:=pinky2 start_node:=D3 
 그 밖의 기본값은 `docking/corridor.py` 맨 위 (가로선 문턱 · 노드 사이 거리 · 벽 따라가기 · 후면 주차),
 `docking/line_dock.py`의 `DEFAULTS` (테이프), `docking/undock.py` 맨 위.
 통로 넘겨받기를 끄려면 `fleet_agent.yaml`의 `corridor_handover: false` (예전 odom 축 후진).
+
+## 입구 D1 (안내 로봇 자리, docking/entrance.py)
+
+```
+N2 ─Nav2─▶ N1 ─(D1 쪽을 봄)─ entrance: 통로 가운데로 남쪽 → 칸막이 시작 + 기록 거리 → 마커 6 거리
+                             → 우90, 앞 벽(라이다) 수직 → 마커 1 = 교점 기록 → 곧게 후진, 마커 1 거리 = D1 ─▶ DOCKED · CMD_DONE
+D1 ─ entrance_exit: 곧게 앞으로 교점 → 마커 1 = 기록 → 우90 북쪽 (통로 벽 평행) ─▶ UNDOCKED ─▶ (안내면 여기서 인사) ─Nav2─▶ N1 ...
+```
+- 교점 = D1에서 곧게 나온 줄 × 남쪽을 볼 때 마커 6이 정면인 줄. 서쪽을 볼 때 방향은 앞 벽을 라이다로 직선 맞춤
+  (odom 90° 회전이 몇 ° 틀려서, 마커 1을 정면에 둬도 로봇 중심이 2 cm 비껴 섰음), 남 · 북을 볼 때는 양옆 벽
+- 서버 명령은 그대로 (`FORWARD [.. N1]` + `REVERSE [D1]`). Driver가 N1에서 뒤로 돌지 않고 D1 쪽을 보고 맡긴다 (`from: N1`)
+- 안내 Move를 D1에서 처음 받으면 빠지기(entrance_exit)를 먼저 하고, 빠진 자리(북쪽을 봄)에서 손님 인사
+- 기록 (fleet_agent 끄고 bringup만): D1 칸에 손으로 반듯하게 (앞 = 마커 1, 바구니 = 칸막이)
+```bash
+ros2 run fleet_agent dock_record d1            # D1 · 교점(마커 1 · 6) · N1 -> ~/align_d1s.json 등. 끝: N1에서 남쪽
+ros2 run fleet_agent dock_record check --dock d1
+```
+
+## 도킹 알림 (fleet_msgs v10)
+
+dock / dock_in(D2 · D3) / entrance(D1) 정밀 정차가 끝나면 `RobotEvent.DOCKED`(node = 도크, reason = 실패면 이유)를
+CMD_DONE 바로 앞에, undock / entrance_exit(빠지기)가 끝나면 `UNDOCKED`(node = 떠난 도크)를 보낸다.
+로봇 로그 `===== DOCKED D1 ok =====`, 서버 로그 `FLEET pinky2 event DOCKED D1` + 매장 화면 알림 · 이력(DOCK).
 
 ## 한 번에 켜기 (robot_system.launch.xml)
 

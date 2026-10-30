@@ -19,6 +19,8 @@ fleet_agent <-> docking 인터페이스 (std_msgs/String, JSON)
             then = tape(P1) -> LineDocker.run / dock_in(D2 · D3) -> 도크 줄 선에서 Steps.park_from_line
   (leave = 노드를 떠날 때, precision_stops의 <노드>.leave)
   undock    : docking/undock.py   마커로 나올 자리까지 + 회전 (+ align 있으면 방위각 정렬)    (D2/D3 -> N16/N15)
+  entrance  : docking/entrance.py Entrance.dock   N1 -> 가운데로 -> 마커 6 · 1 교점 -> 우90 -> 곧게 후진 (D1)
+  entrance_exit : docking/entrance.py Entrance.undock  D1 -> 교점 -> 우90 북쪽 (그다음 Nav2)
   table     : docking/table_dock.py TableDocker.run   다리 마커로 차선 정렬 -> 바닥 정지선            (T1~T6)
   table_exit: docking/table_dock.py TableDocker.leave 서빙 뒤 dist만큼 전진 (그다음 Nav2)
   tape_exit : docking/line_dock.py LineDocker.leave  앞으로 빼서 새 선에서 정지              (P1 -> 그다음 Nav2)
@@ -46,6 +48,7 @@ from .docking.corridor import BAR_BLACK, FOLLOW_STOP_EARLY, Lidar, Steps, _load,
 from .docking.line_dock import DEFAULTS, LineDocker, Motion
 from .docking.undock import undock
 from .docking.table_dock import TableDocker
+from .docking.entrance import Entrance
 
 
 class DockingNode(Node):
@@ -155,6 +158,10 @@ class DockingNode(Node):
                 result = LineDocker(self, self.cmd_pub, self.cancelled, self.tf_buf, self.ir).leave(req)
             elif method == 'undock':
                 result = self.run_undock(req)
+            elif method == 'entrance':
+                result = self.run_entrance(req, out=False)
+            elif method == 'entrance_exit':
+                result = self.run_entrance(req, out=True)
             elif method == 'table':
                 result = self.run_table(req)
             elif method == 'table_exit':
@@ -212,7 +219,7 @@ class DockingNode(Node):
         dk = self.docker(int(req['marker']), f'{req.get("node")}_undock')
         return undock(self, self.cmd_pub, self.cancelled, self.tf_buf, dk.cam, req)
 
-    def steps(self, marker, tag):
+    def steps(self, marker, tag, cls=Steps):
         """corridor.Steps (마커 + 라이다 + 바닥 센서). marker가 None이면 카메라 없이 (벽 따라가기만)"""
         if marker is None:
             md.open_log(tag)
@@ -221,7 +228,14 @@ class DockingNode(Node):
             cam = self.docker(int(marker), tag).cam
         mv = Motion(self, self.cmd_pub, self.cancelled, self.tf_buf, self.ir, dict(DEFAULTS, ir_black=BAR_BLACK))
         mv.dk.wait_pose()
-        return Steps(mv, cam, md.log, self.lidar)
+        return cls(mv, cam, md.log, self.lidar)
+
+    def run_entrance(self, req, out):
+        """입구 통로 D1 (docking/entrance.py): out=False N1 -> D1, out=True D1 -> 교점 북쪽"""
+        st = self.steps(1 if out else 6, f'{req.get("node")}_{"exit" if out else "entrance"}', cls=Entrance)
+        md.log(f'[{req.get("node")}] {"빠지기 (교점 -> 북쪽)" if out else "도킹 (N1 -> 교점 -> 후진)"}')
+        md.log(f'결과: {st.undock() if out else st.dock()}')
+        return '성공'
 
     def corridor_names(self):
         """지금 계획에서 벽 따라 지나갈 통로 노드 (dock_in이면 도크 바로 앞 줄 노드까지)"""

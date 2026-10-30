@@ -69,7 +69,7 @@ nodes:
   - {id: T6, type: STOP, stop_kind: SERVE, table: T6, lock: true, x: 0.727, y: -0.079, next: [N9, N10]}  # [추정]
 
   # ---- 도킹 (후진 진입·전진 출차, 앞은 통로 쪽 = 왼쪽, 바구니는 벽 쪽) ----
-  - {id: D1, type: STOP, stop_kind: DOCK, pocket: true, entry: REVERSE, lock: true, x: 1.721, y: 0.179, yaw: 0.069, next: [N1]}   # [추정] 입구 통로 (마커 1 · 6)
+  - {id: D1, type: STOP, stop_kind: DOCK, pocket: true, entry: REVERSE, lock: true, x: 1.721, y: 0.179, yaw: 0.069, next: [N1]}   # [추정] 입구 통로 (마커 1 · 6). 로봇은 N1에서 entrance로 통째로 (precision_stops)
   - {id: D2, type: STOP, stop_kind: DOCK, pocket: true, entry: REVERSE, lock: true, x: 0.068, y: -0.125, yaw: 0.069, next: [N16]}   # [추정] 주방 아래 구역 위 칸 (N16 옆, 마커 2)
   - {id: D3, type: STOP, stop_kind: DOCK, pocket: true, entry: REVERSE, lock: true, x: 0.046, y: 0.069, yaw: 0.069, next: [N15]}   # [추정] 주방 아래 구역 아래 칸 (N15 옆, 마커 3)
 

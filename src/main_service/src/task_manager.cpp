@@ -323,6 +323,16 @@ void TaskManager::onRobotEvent(const std::string& id, uint8_t type, uint32_t cmd
     alert("ERROR", id, "이동 실패 " + reason + ". 확인 후 재개해 주세요");
   } else if (type == EVENT_BLOCKED) {
     alert("WARN", id, "진행이 막혔어요 (" + node + ")");
+  } else if (type == EVENT_DOCKED) {
+    // 로봇이 도크(D1 · D2 · D3)에 정밀 도킹을 끝냄 (CMD_DONE 바로 앞). 실패면 Nav2 위치로 섬
+    if (reason.empty()) alert("INFO", id, node + " 도킹 완료");
+    else alert("WARN", id, node + " 도킹 정밀 정차 실패: " + reason);
+    record("DOCK", id + " " + node + " 도킹" + (reason.empty() ? "" : " 실패 " + reason));
+  } else if (type == EVENT_UNDOCKED) {
+    // 도크에서 빠지기 끝 (D1: 교점에서 북쪽 / D2 · D3: N16 · N15) -> 이어서 이동
+    if (reason.empty()) alert("INFO", id, node + "에서 출발");
+    else alert("WARN", id, node + " 빠지기 실패: " + reason);
+    record("DOCK", id + " " + node + " 언도킹" + (reason.empty() ? "" : " 실패 " + reason));
   }
   dirty_ = true;
   afterChange();

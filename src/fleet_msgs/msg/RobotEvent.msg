@@ -7,6 +7,8 @@ uint8 CMD_DONE=1        # 명령의 마지막 노드 도착 (도킹 노드라면
 uint8 CMD_FAILED=2      # 이동 실패 (reason에 이유)
                         # 3: 사용 안 함 (v3의 LOAD_CHANGED. 적재 확인은 GUI -> 서버로 바뀜)
 uint8 BLOCKED=4         # 일정 시간 진척 없음
+uint8 DOCKED=5          # (v10) 도킹 정밀 정차 끝 (node_id = 도크, reason = 실패면 이유). 같은 도크의 CMD_DONE 바로 앞
+uint8 UNDOCKED=6        # (v10) 도크에서 빠지기 끝 (node_id = 떠난 도크, reason = 실패면 이유). 그다음 이동 시작
 
 string robot_id                   # 로봇 ID
 builtin_interfaces/Time stamp     # 발생 시각

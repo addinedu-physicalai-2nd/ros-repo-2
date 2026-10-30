@@ -36,6 +36,8 @@ const uint8_t EVENT_NODE_REACHED = 0;
 const uint8_t EVENT_CMD_DONE = 1;
 const uint8_t EVENT_CMD_FAILED = 2;
 const uint8_t EVENT_BLOCKED = 4;
+const uint8_t EVENT_DOCKED = 5;      // (v10) 도킹 끝
+const uint8_t EVENT_UNDOCKED = 6;    // (v10) 도크에서 빠지기 끝
 
 // ---------------------------------------------------------------- 서버 -> 로봇 명령 (ROS 메시지와 필드 1:1)
 

@@ -163,8 +163,12 @@ class FleetAgent(Node):
         m.node_id = node
         m.reason = reason
         self.event_pub.publish(m)
-        name = {0: 'NODE_REACHED', 1: 'CMD_DONE', 2: 'CMD_FAILED', 4: 'BLOCKED'}.get(etype, str(etype))
-        self.get_logger().info(f'event {name} {node} {reason}')
+
+        name = {0: 'NODE_REACHED', 1: 'CMD_DONE', 2: 'CMD_FAILED', 4: 'BLOCKED', 5: 'DOCKED', 6: 'UNDOCKED'}.get(etype, str(etype))
+        if etype in (5, 6):   # 도킹 · 언도킹: 눈에 띄게 (서버에도 같은 event로 알림)
+            self.get_logger().info(f'===== {name} {node} {reason or "ok"} =====')
+        else:
+            self.get_logger().info(f'event {name} {node} {reason}')
 
     # ================================================================ 주기
     def tick(self):

@@ -98,8 +98,10 @@ void FleetLinkManager::onState(const std::string& robot_id, const fleet_msgs::ms
 
 void FleetLinkManager::onEvent(const std::string& robot_id, const fleet_msgs::msg::RobotEvent& msg) {
   markReceived(robot_id);
-  logLine("FLEET", robot_id + " event " + std::to_string(msg.type) + " " + msg.node_id + " (cmd " +
-                       std::to_string(msg.cmd_id) + ")");
+  static const char* names[] = {"NODE_REACHED", "CMD_DONE", "CMD_FAILED", "?", "BLOCKED", "DOCKED", "UNDOCKED"};
+  std::string name = msg.type < 7 ? names[msg.type] : std::to_string(msg.type);
+  logLine("FLEET", robot_id + " event " + name + " " + msg.node_id + " (cmd " + std::to_string(msg.cmd_id) + ")" +
+                       (msg.reason.empty() ? "" : " " + msg.reason));
   if (tasks_) tasks_->onRobotEvent(robot_id, msg.type, msg.cmd_id, msg.node_id, msg.reason);
 }
 

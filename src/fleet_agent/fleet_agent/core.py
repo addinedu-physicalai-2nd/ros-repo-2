@@ -18,7 +18,9 @@ REVERSE = 1
 # RobotState.state
 IDLE, MOVING, PAUSED, BLOCKED, ERROR = 0, 1, 2, 3, 4
 # RobotEvent.type
-NODE_REACHED, CMD_DONE, CMD_FAILED, EV_BLOCKED = 0, 1, 2, 4
+NODE_REACHED, CMD_DONE, CMD_FAILED, EV_BLOCKED, DOCKED, UNDOCKED = 0, 1, 2, 4, 5, 6
+DOCK_METHODS = ('dock', 'dock_in', 'entrance')          # 도킹 정밀 정차 -> 끝나면 DOCKED
+UNDOCK_METHODS = ('undock', 'entrance_exit')           # 도킹에서 빠지기 (leave) -> 끝나면 UNDOCKED
 # Control.command
 PAUSE, RESUME, CANCEL = 0, 1, 2
 
@@ -40,7 +42,7 @@ def load_precision_stops(path):
         data = yaml.safe_load(f) or {}
     out = {}
     for node, cfg in data.items():
-        if isinstance(cfg, dict) and cfg.get('method') in ('dock', 'align', 'tape', 'dock_in','table'):
+        if isinstance(cfg, dict) and cfg.get('method') in ('dock', 'align', 'tape', 'dock_in', 'table', 'entrance'):
             out[str(node)] = dict(cfg)
     return out
 
@@ -264,8 +266,14 @@ class Driver:
         못 간 노드는 큐로 돌려 거기서 다시 넘겨받기
         docking이 실패하거나 시간 초과면 도착으로 치지 않고 멈춤 -> CMD_FAILED reason="corridor_failed:<노드>:<이유>"
         (재개하면 남은 노드로 다시 맡김)
+      - 입구 도킹 D1 (method entrance, from: N1): 도착지가 D1이면 N1에서 D1 쪽을 보고 docking에 통째로 맡긴다
+        (entrance_approach: 가운데로 -> 마커 6 · 1 교점 -> 우90 -> 곧게 후진). 끝나면 돌지 않고 CMD_DONE
+        leave entrance_exit: 교점까지 나와 북쪽을 봄 -> 그다음 평소처럼 (돌아서) Nav2로 N1
+      - 도킹 알림: dock / dock_in / entrance 정밀 정차가 끝나면 CMD_DONE 앞에 DOCKED(노드, reason=실패 이유),
+        undock / entrance_exit leave가 끝나면 UNDOCKED(도크 노드, reason=실패 이유)
     안내 (Move.guide = true): 서버는 "안내 중"과 도착지만 알려 주고, 나머지는 로봇이 판단한다
       - 인사 : 안내가 아닌 상태에서 안내 Move를 처음 받으면, 떠나기 전에 Guide 'greet' (앞 카메라로 손님 기다림)
+               도크에서 출발하면 leave(빠지기)를 먼저 하고 그 자리에서 인사 (도크 안에서는 카메라가 벽을 봄)
       - 확인 : 꺾이는 노드(들어온 방향과 나갈 방향이 check_turn 넘게 다름)에서 멈춤 -> 뒤로 돎 -> Guide 'watch'
                -> 다음 노드 쪽으로 돎 -> 이어 감. 바로 전 인사 · 확인 자리에서 check_gap m 안이면 건너뜀
       - 도착 : 도착지(goal_node)에서 CMD_DONE 뒤 Guide 'arrive' (도착 효과, 기다리지 않음). 안내는 정밀 정차 안 함
@@ -323,6 +331,9 @@ class Driver:
         self.handover_req = None
         self.prec_info = {}           # docking 결과에 붙은 값 (corridor reached · then_done)
         self.prec_result = ''         # 마지막 정밀 정차 결과 detail
+        self.entrance_req = None      # entrance_approach 요청 (N1에서 D1 도킹을 통째로)
+        self.entrance_turn = False    # entrance: D1 쪽으로 돌고 나서 맡김
+        self.greet_after_leave = False  # 안내 첫 출발이 도크에서: leave 끝나고 인사
         self._last_pose = (0.0, 0.0, 0.0)
 
     # ------------------------------------------------------------ 입력
@@ -337,6 +348,8 @@ class Driver:
             self._stop_motion()
             self.queue.apply(cmd_id, False, drive, waypoints, guide, goal)
             self.handover, self.handover_req = [], None
+            self.entrance_req, self.entrance_turn = None, False
+            self.greet_after_leave = False
             self.cur = None
             self.phase = 'idle'
             self.error = False
@@ -365,6 +378,8 @@ class Driver:
         elif cmd == CANCEL:
             self._stop_motion()
             self.in_guide = False
+            self.greet_after_leave = False
+            self.entrance_req, self.entrance_turn = None, False
             self.handover, self.handover_req = [], None
             self.queue.clear()
             self.cur = None
@@ -376,7 +391,8 @@ class Driver:
             self.nav_state = 'ok' if ok else 'fail'
 
     def on_precision_result(self, ok, detail='', info=None):
-        if self.phase in ('align', 'precision', 'leave', 'tape_approach', 'corridor_approach','table_approach') \
+        if self.phase in ('align', 'precision', 'leave', 'tape_approach', 'corridor_approach', 'table_approach',
+                          'entrance_approach') \
                 and self.prec_state == 'running':
             self.prec_state = 'ok'
             self.prec_ok = ok
@@ -510,15 +526,31 @@ class Driver:
                     self.axis = pose[2]
                     self.axis_odom = self._odom_yaw()
                     self.skip_turn = True
+                if req.get('method') in UNDOCK_METHODS:
+                    self.io.event(UNDOCKED, self.queue.cmd_id, req.get('node', ''),
+                                  '' if self.prec_ok else f'{req.get("node", "")}:{self.prec_result}')
                 if self.prec_ok and req.get('to') == self.cur.node_id:
                     self.io.log(f'{req.get("node")} {req.get("method")} -> {self.cur.node_id} 도착')
-                    self._reached(pose)
+                    after = self._reached
                 else:
-                    self._depart(pose)
+                    after = self._depart
+                if self.greet_after_leave:      # 안내 첫 출발: 빠진 자리에서 인사
+                    self.greet_after_leave = False
+                    self.in_guide = True
+                    self.check_xy = (pose[0], pose[1])
+                    self._guide_request('greet', req.get('node') or self.cur.node_id, after)
+                else:
+                    after(pose)
         elif self.phase == 'tape_approach':
             if self.prec_state == 'ok':
                 self.prec_state = ''
                 self.prec_done_node = self.cur.node_id
+                self._reached(pose)
+        elif self.phase == 'entrance_approach':
+            if self.prec_state == 'ok':
+                self.prec_state = ''
+                self.prec_done_node = self.cur.node_id   # 입구 도킹까지 끝 = D1 도착 (돌지 않음)
+                self.entrance_req = None
                 self._reached(pose)
         elif self.phase == 'table_approach':
             if self.prec_state == 'ok':
@@ -581,6 +613,10 @@ class Driver:
         if self.prev_xy is None:
             self.prev_xy = (pose[0], pose[1])
         if self.cur.guide and not self.in_guide:
+            if self.leave_from and self.stops.get(self.leave_from, {}).get('leave'):
+                self.greet_after_leave = True   # 도크 안이면 빠지기(leave)부터, 인사는 빠진 자리에서
+                self._depart(pose)
+                return
             # 안내 첫 출발: 떠나기 전에 앞(카메라)으로 손님을 기다린다
             self.in_guide = True
             self.check_xy = (pose[0], pose[1])
@@ -600,6 +636,15 @@ class Driver:
             self.io.direction('STOP')
             self.io.precision(self.leave_req)
             return
+        stop = self.stops.get(self.cur.node_id, {})
+        if (stop.get('method') == 'entrance' and self._precise_here(self.cur)
+                and self.last_node == stop.get('from', self.last_node)):
+            # 입구 도킹: 그 앞 노드(N1)에서 D1 쪽(통로 방향)을 보고 docking에 통째로 맡김 (뒤로 돌지 않음)
+            self.turn_target = math.atan2(self.cur.y - pose[1], self.cur.x - pose[0])
+            self.entrance_turn = True
+            self.phase = 'turn'
+            self.io.direction('STOP')
+            return
         if self.last_drive is not None and self.cur.drive != self.last_drive and self.skip_turn:
             self.skip_turn = False    # 마커로 축을 이미 맞춤 -> 돌지 않고 바로
             self._begin_move(pose)
@@ -615,6 +660,19 @@ class Driver:
 
     def _begin_move(self, pose):
         self.seg_start = (pose[0], pose[1])
+        if self.entrance_turn:
+            self.entrance_turn = False
+            self.axis = None
+            self.axis_odom = None
+            self.io.cmd_vel(0.0, 0.0)
+            self.entrance_req = dict(self.stops.get(self.cur.node_id, {}), node=self.cur.node_id,
+                                     from_node=self.last_node)
+            self.phase = 'entrance_approach'
+            self.prec_state = 'running'
+            self.io.direction('STOP')
+            self.io.log(f'입구 도킹 넘겨받기: {self.last_node} -> {self.cur.node_id}')
+            self.io.precision(dict(self.entrance_req))
+            return
         if self.cur.drive == FORWARD:
             self.axis = None
             self.axis_odom = None
@@ -663,6 +721,9 @@ class Driver:
         elif self.phase == 'tape_approach':
             self.prec_state = 'running'
             self.io.precision(dict(self.stops.get(self.cur.node_id, {}), node=self.cur.node_id, approach=True))
+        elif self.phase == 'entrance_approach' and self.entrance_req:
+            self.prec_state = 'running'
+            self.io.precision(dict(self.entrance_req))
         elif self.phase == 'table_approach' and self.table_req:   # ← 추가 (테이블)
             self.prec_state = 'running'
             self.io.precision(dict(self.table_req))    
@@ -713,7 +774,8 @@ class Driver:
         """줄 끝 노드: yaw 맞추기 -> (dock / tape) -> CMD_DONE"""
         self.io.direction('STOP')
         stop = self.stops.get(self.cur.node_id, {})
-        keep_axis = self.axis is not None or stop.get('no_final_turn')   # 축 그대로 (테이프가 이어서 맞춤)
+        keep_axis = (self.axis is not None or stop.get('no_final_turn')   # 축 그대로 (테이프가 이어서 맞춤)
+                     or (self.prec_done_node and self.prec_done_node == self.cur.node_id))   # 정밀 정차를 이미 함
         if self.cur.drive == REVERSE and not keep_axis and abs(wrap(self.cur.yaw - pose[2])) > self.yaw_tol:
             self.turn_target = self.cur.yaw  # FORWARD는 Nav2가 이미 맞춤
             self.phase = 'final_turn'
@@ -755,6 +817,9 @@ class Driver:
         self.io.precision(stop)
 
     def _done(self):
+        stop = self.stops.get(self.cur.node_id, {})
+        if stop.get('method') in DOCK_METHODS and self._precise_here(self.cur) and not self.cur.guide:
+            self.io.event(DOCKED, self.queue.cmd_id, self.cur.node_id, self.prec_detail)   # 도킹 끝 (실패면 이유)
         # 정밀 정차를 못 했으면 이유를 reason에 (서버가 경고만 띄우고 작업은 이어 감)
         self.io.event(CMD_DONE, self.queue.cmd_id, self.cur.node_id, self.prec_detail)
         self.prec_detail = ''
@@ -930,7 +995,8 @@ class Driver:
     def _stop_motion(self, keep=False, keep_dir=False):
         self.io.cmd_vel(0.0, 0.0)
         self.io.nav_cancel()
-        if self.phase in ('align', 'precision', 'leave', 'tape_approach', 'corridor_approach','table_approach'):
+        if self.phase in ('align', 'precision', 'leave', 'tape_approach', 'corridor_approach', 'table_approach',
+                          'entrance_approach'):
             self.io.precision_cancel()
         if self.phase in ('guide_greet', 'guide_watch'):
             self.io.guide_cancel()

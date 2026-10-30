@@ -639,6 +639,14 @@ target_link_libraries(main_service rclcpp::rclcpp ${fleet_msgs_TARGETS})
 
 ## 10. 변경 이력
 
+### v10 (RobotEvent 상수 추가, 필드 변경 없음)
+
+| 구분 | 내용 |
+|---|---|
+| RobotEvent | `DOCKED=5` (도킹 정밀 정차 끝, node = 도크) · `UNDOCKED=6` (도크에서 빠지기 끝, node = 떠난 도크). reason = 실패면 이유 |
+| 서버 | 두 이벤트는 알림(INFO / 실패면 WARN) · 이력(DOCK)만. lock · 작업 판단은 그대로 NODE_REACHED · CMD_DONE |
+| 입구 D1 | 로봇 쪽 `entrance` (N1에서 통째로 도킹), 빠지기 `entrance_exit` (교점에서 북쪽 → Nav2) |
+
 ### 노드 그래프 v7.1 (최종 맵 도킹 이름, 메시지 변경 없음)
 
 | 구분 | 내용 |

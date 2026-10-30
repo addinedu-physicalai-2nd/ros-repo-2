@@ -6,6 +6,9 @@
   ros2 run fleet_agent dock_record align <이름> --id <마커> [--size 0.05]   # 그 자리에서 정렬 기록 하나
   ros2 run fleet_agent dock_record check [--dock d3]   # 기록 확인 (cm · °)
   ros2 run fleet_agent dock_record scan                # 지금 자리에서 라이다로 양옆 벽이 보이나
+  ros2 run fleet_agent dock_record d1 [--line-tz 0.21] # 입구 D1 칸에 손으로 반듯하게 (앞 = 마커 1, 바구니 = 칸막이):
+                                                       #   D1 · 교점(마커 1 · 6) · N1 (docking/entrance.py). 끝: N1에서 남쪽
+  ros2 run fleet_agent dock_record check --dock d1     # D1 기록 확인
 
 all 순서 (손으로 놓는 건 D3 하나. 나머지는 로봇이 벽과 수직으로 맞추고 찍음)
   D3(손) -> 앞으로 곧게 나와 마커 3이 --n15-tz(기본 15 cm)인 곳 = N15: n15 저장
@@ -19,6 +22,7 @@ import math
 import os
 
 from . import marker_dock as md
+from . import entrance
 from .corridor import Lidar, Steps, _save, align_record, bearing, check, side_lines
 from .line_dock import DEFAULTS, Motion
 from .undock import _set_size
@@ -32,15 +36,19 @@ RECORDS = {
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('cmd', choices=['all', 'dock', 'align', 'check', 'scan'])
+    ap.add_argument('cmd', choices=['all', 'dock', 'align', 'check', 'scan', 'd1'])
     ap.add_argument('name', nargs='?', help='align: 기록 이름 (~/align_<이름>.json)')
-    ap.add_argument('--dock', default='d3', choices=sorted(RECORDS))
+    ap.add_argument('--dock', default='d3', choices=sorted(RECORDS) + ['d1'])
+    ap.add_argument('--line-tz', type=float, default=entrance.LINE_TZ, help='d1: D1에서 곧게 앞으로 교점까지 대략 (마커 1 거리 m)')
     ap.add_argument('--id', type=int, help='align: 마커 ID')
     ap.add_argument('--size', type=float, default=0.05, help='align: 마커 한 변 m (기본 5 cm)')
     ap.add_argument('--n15-tz', type=float, default=0.15, help='all/dock: N15 = 마커 3까지 카메라 거리 m')
     ap.add_argument('--n14-tz', type=float, default=0.13, help='all: N14 = 마커 5(남쪽 벽)까지 카메라 거리 m')
     args, _ = ap.parse_known_args()
-    cfg = RECORDS[args.dock]
+    if args.cmd == 'check' and args.dock == 'd1':
+        print(entrance.check())
+        return
+    cfg = RECORDS.get(args.dock, RECORDS['d3'])
     if args.cmd == 'check':
         print(check((cfg['front'], cfg['axis'], cfg['via']), (cfg['stop'], cfg['target'])))
         return
@@ -110,6 +118,9 @@ def main():
                 _save(path, align_record(args.id, args.size, m))
                 result = (f'저장: 거리 {m["tz"] * 100:.1f} cm, 방위각 {math.degrees(bearing(m)):+.2f}°, '
                           f'기울기 {math.degrees(m["yaw"]):+.1f}° -> {path}')
+        elif args.cmd == 'd1':
+            cam = md.Camera(1)
+            result = entrance.Entrance(mv, cam, md.log, lidar, line_tz=args.line_tz).record()
         else:
             cam = md.Camera(cfg['marker'])
             st = Steps(mv, cam, md.log, lidar)
