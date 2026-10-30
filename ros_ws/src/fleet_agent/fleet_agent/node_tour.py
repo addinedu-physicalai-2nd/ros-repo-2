@@ -12,12 +12,12 @@ fleet_agent에 /fleet/move를 직접 보내고 /fleet/event를 받아서, 노드
   ros2 run fleet_agent node_tour --tables all       # 그 노드가 맡은 테이블 모두 (N3 = T2, T1 차례로)
   ros2 run fleet_agent node_tour --start D1 --spin 360 N1 N2 ...   # 도크에서 시작: leave(빠지기) -> 첫 노드 -> 한 바퀴
 
-  --preset hall = --start D1 --tables all N1 N2 N3 N4 N7 N6 N5 N8 N11 N12 N9 N10 N13
+  --preset hall = --start D1 --tables all --keep-going N1 N2 N3 N4 N7 N6 N5 N8 N11 N12 N9 N10 N13
      + --spin 360: 첫 노드(N1)에서 한 바퀴 (AMCL 맞춤. 시스템은 시작 전 위치 맞추기 LOCALIZE로 한 번 함)
      로봇 쪽: robot_system start_node:=D1 use_docking:=true precision_stops:=.../precision_stops.yaml (spin_deg 0)
   --start <도크>: 첫 Move에 도크를 넣지 않는다 (fleet_agent가 start_node의 leave = 빠지기를 먼저 하고 첫 노드로 Nav2)
   --spin <deg>: (따로 시험할 때) 첫 노드에 서면 제자리 회전 (cmd_vel, odom) -> AMCL 맞춤. 앞뒤 AMCL 불확실성을 기록
-  --tables: 테이블 모서리 = precision_stops.yaml T의 face (fleet_agent가 테이블 도착지일 때 직전 노드에서 보는 점).
+  --tables: 테이블 모서리 = node_graph T 좌표 (fleet_agent가 테이블 도착지일 때 직전 노드에서 보는 점, from = precision_stops).
             그 노드에서 다리를 끊고 마지막 yaw = 모서리 쪽으로 보내서, 도착 뒤 방향 오차를 잰다
 
   - 후진 구간(node_graph reverse)과 도킹 노드는 목표로 적지 않으면 지나가지 않는다 (전진 주행만 시험)
@@ -25,6 +25,7 @@ fleet_agent에 /fleet/move를 직접 보내고 /fleet/event를 받아서, 노드
 
 로그 (~/tour_logs/tour_<시각>_*): 문제 찾기용
   .log        보낸 Move(좌표 · yaw), 받은 이벤트 전부(reason 포함), 노드마다 위치 · 앞뒤/옆 오차 · AMCL, 회전 앞뒤 AMCL
+              + /rosout: fleet_agent · docking · obstacle INFO 이상, Nav2(bt_navigator · controller 등) WARN 이상 (<노드 I/W/E>)
   _trace.csv  0.2초마다 t, x, y, yaw(map), amcl_std, cmd v, w, 지금 다리 · 목표 노드 (지나간 길 그림용)
   _result.csv 결과 표
 """
@@ -41,6 +42,7 @@ import yaml
 from ament_index_python.packages import get_package_share_directory
 from fleet_msgs.msg import Control, Move, RobotEvent, Waypoint
 from geometry_msgs.msg import PoseWithCovarianceStamped, Twist
+from rcl_interfaces.msg import Log
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from rclpy.signals import SignalHandlerOptions
@@ -59,6 +61,9 @@ PRESETS = {
 EV_NAME = {0: 'NODE_REACHED', 1: 'CMD_DONE', 2: 'CMD_FAILED', 3: 'STATE', 4: 'BLOCKED', 5: 'DOCKED', 6: 'UNDOCKED',
            7: 'LOCALIZED'}
 SPIN_W = 0.5            # rad/s 제자리 회전 속도
+ROSOUT_FLEET = {'fleet_agent', 'docking', 'obstacle', 'initial_pose'}          # INFO 이상을 로그에
+ROSOUT_NAV2 = {'bt_navigator', 'controller_server', 'planner_server', 'behavior_server',
+               'amcl', 'velocity_smoother', 'smoother_server'}                 # WARN 이상만
 SPIN_TIMEOUT = 40.0     # s
 
 
@@ -122,6 +127,7 @@ class Tour(Node):
         amcl_qos = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL,
                               reliability=ReliabilityPolicy.RELIABLE)
         self.create_subscription(PoseWithCovarianceStamped, '/amcl_pose', self.on_amcl, amcl_qos)
+        self.create_subscription(Log, '/rosout', self.on_rosout, QoSProfile(depth=200, reliability=ReliabilityPolicy.RELIABLE))
         self.tf = Buffer()
         self.tfl = TransformListener(self.tf, self)
         self.cmd_id = int(time.time()) % 1000000 * 100 + 50
@@ -131,6 +137,9 @@ class Tour(Node):
         self.t0 = time.monotonic()
         self.rows = []            # (노드, 걸린 초, 위치 오차 m, 방향 오차 deg, 앞뒤 m, 옆 m)
         self.failed = None
+        self.fails = []           # 실패한 다리 (keep_going이면 넘어감)
+        self.fail_run = 0
+        self.keep_going = False
         self.done = False
         self.wait_until = None
         self.prev_node = None
@@ -154,10 +163,25 @@ class Tour(Node):
     # ------------------------------------------------------------ 로그
     def log(self, text, level='info'):
         t = time.monotonic() - self.t0
-        line = f'[{t:7.2f}] {text}'
-        getattr(self.get_logger(), level)(text)
-        if self.log_f:
-            self.log_f.write(line + '\n')
+        if self.log_f:                 # 파일 먼저 (화면 로그가 실패해도 남게)
+            self.log_f.write(f'[{t:7.2f}] {text}\n')
+            self.log_f.flush()
+        lg = self.get_logger()         # rclpy: 한 줄(호출 자리)에서 심각도를 바꾸면 ValueError -> 심각도마다 따로 부름
+        if level == 'error':
+            lg.error(text)
+        elif level == 'warn':
+            lg.warning(text)
+        else:
+            lg.info(text)
+
+    def on_rosout(self, m):
+        """fleet_agent · docking · obstacle 로그(INFO 이상)와 Nav2 경고 · 에러를 투어 로그에 같이 (실패 원인 찾기)"""
+        name = m.name.split('.')[-1]
+        if name == 'node_tour' or not self.log_f:
+            return
+        if name in ROSOUT_FLEET and m.level >= 20 or name in ROSOUT_NAV2 and m.level >= 30:
+            lv = {10: 'D', 20: 'I', 30: 'W', 40: 'E', 50: 'F'}.get(m.level, str(m.level))
+            self.log_f.write(f'[{time.monotonic() - self.t0:7.2f}]     <{name} {lv}> {m.msg}\n')
             self.log_f.flush()
 
     def on_amcl(self, msg):
@@ -289,6 +313,9 @@ class Tour(Node):
         if not mine:
             self.log(f'  (다른 명령 이벤트) {name} {e.node_id} cmd {e.cmd_id}{reason}')
             return
+        if e.cmd_id != self.cmd_id:   # 버린(실패한) 다리에서 늦게 온 이벤트: 기록만
+            self.log(f'  (지난 다리 이벤트) {name} {e.node_id} cmd {e.cmd_id}{reason}')
+            return
         now = time.monotonic()
         p = self.pose()
         if e.type == RobotEvent.NODE_REACHED:
@@ -311,6 +338,7 @@ class Tour(Node):
             self.t_node = now
             self.prev_node = e.node_id
         elif e.type == RobotEvent.CMD_DONE:
+            self.fail_run = 0
             self.log(f'  다리 끝 {e.node_id} ({now - self.t_leg:.1f}초){reason}  위치 {self.ptext(p)}  {self.amcl_text()}')
             if self.leg in self.faces:
                 table, want = self.faces[self.leg]
@@ -329,8 +357,20 @@ class Tour(Node):
             self.log(f'  {name} {e.node_id}{reason}  위치 {self.ptext(p)}  {self.amcl_text()}'
                      + ('  (실패: reason 확인)' if e.reason else ''))
         elif e.type in (RobotEvent.CMD_FAILED, RobotEvent.BLOCKED):
-            self.failed = f'{name} {e.node_id} {e.reason}'
-            self.log(f'  {self.failed} -> 순회 멈춤  위치 {self.ptext(p)}  {self.amcl_text()}', 'error')
+            what = f'{name} {e.node_id} {e.reason}'
+            self.fails.append(f'[{self.leg + 1}] {what}')
+            self.rows.append((f'!{e.node_id}', now - self.t_leg, float('nan'), float('nan'), float('nan'), float('nan')))
+            self.fail_run += 1
+            if self.keep_going and self.fail_run < 3 and self.leg + 1 < len(self.legs):
+                # 이 다리는 버리고 다음 다리로 (투어 한 번에 노드 전부 데이터를 얻으려고). 연속 3번이면 멈춤
+                self.log(f'  {what} -> 이 다리 버리고 1.5초 뒤 다음 다리  위치 {self.ptext(p)}  {self.amcl_text()}', 'error')
+                stop = Control()
+                stop.command = Control.CANCEL
+                self.ctl.publish(stop)
+                self.wait_until = now + 1.5
+                return
+            self.failed = what
+            self.log(f'  {what} -> 순회 멈춤  위치 {self.ptext(p)}  {self.amcl_text()}', 'error')
             self.done = True
         else:
             self.log(f'  {name} {e.node_id}{reason}')
@@ -368,7 +408,10 @@ class Tour(Node):
         if faces:
             out.append(f'테이블 보기 {len(faces)}번, 방향 오차 평균 {sum(faces) / len(faces):.1f}°, 최대 {max(faces):.1f}°')
         out.append(f'총 {time.monotonic() - self.t0:.0f}초')
-        out.append('결과: ' + (f'실패 ({self.failed})' if self.failed else '끝까지 완료'))
+        if self.fails:
+            out.append(f'실패 {len(self.fails)}번: ' + ' / '.join(self.fails))
+        out.append('결과: ' + (f'실패 ({self.failed})' if self.failed else
+                               ('끝까지 감 (실패한 다리는 건너뜀)' if self.fails else '끝까지 완료')))
         if self.log_base:
             out.append(f'로그: {self.log_base}.log / _trace.csv / _result.csv')
         print('\n'.join(out))
@@ -445,6 +488,8 @@ def main():
     ap.add_argument('--start', default='', help='시작 도크 (예: D1). 첫 Move에 안 넣음 -> fleet_agent가 빠지기 먼저')
     ap.add_argument('--spin', type=float, default=0.0, help='--start 뒤 첫 노드에서 제자리 회전 각도 (AMCL 맞춤)')
     ap.add_argument('--log-dir', default='~/tour_logs', help='로그 폴더 ("" = 안 남김)')
+    ap.add_argument('--keep-going', action='store_true',
+                    help='다리가 실패(CMD_FAILED · BLOCKED)해도 멈추지 말고 다음 다리로 (연속 3번이면 멈춤). hall은 기본으로 켬')
     a = ap.parse_args(argv)
     if a.preset:
         pr = PRESETS[a.preset]
@@ -452,6 +497,7 @@ def main():
         a.start = a.start or pr['start']
         a.spin = a.spin or pr['spin']
         a.tables = a.tables or pr['tables']
+        a.keep_going = True
 
     docs = os.path.join(get_package_share_directory('fleet_msgs'), 'docs')
     path = a.graph or os.path.join(docs, 'node_graph.yaml')
@@ -465,11 +511,12 @@ def main():
         with open(a.stops or os.path.join(docs, 'precision_stops.yaml'), encoding='utf-8') as f:
             stops = yaml.safe_load(f) or {}
         for t, cfg in stops.items():
-            if isinstance(cfg, dict) and cfg.get('method') == 'table' and cfg.get('face'):
+            if isinstance(cfg, dict) and cfg.get('method') == 'table' and str(t) in g.nodes:
+                pt = cfg.get('face') or (g.nodes[str(t)]['x'], g.nodes[str(t)]['y'])   # T 좌표 = 테이블 모서리
                 for n in (cfg.get('from') or {}):
-                    face_at.setdefault(str(n), []).append((str(t), tuple(map(float, cfg['face']))))
+                    face_at.setdefault(str(n), []).append((str(t), tuple(map(float, pt))))
         if not face_at:
-            sys.exit('precision_stops.yaml에 face 있는 테이블이 없음')
+            sys.exit('precision_stops.yaml에 테이블(method table)이 없음')
         for n, lst in face_at.items():
             lst.sort(key=lambda tf: math.hypot(tf[1][0] - g.nodes[n]['x'], tf[1][1] - g.nodes[n]['y']))
             if a.tables == 'near':
@@ -483,6 +530,7 @@ def main():
     rclpy.init(signal_handler_options=SignalHandlerOptions.NO)   # Ctrl+C 때 멈춤 명령을 보내고 끝내려고
     node = Tour(g, legs, a.step, faces, spin_after if a.spin > 0 else None, a.spin, log_base)
     node.yaw_end = yaw_end
+    node.keep_going = a.keep_going
     node.log('코스: ' + (f'{a.start} (빠지기) -> ' if a.start else '') + ' -> '.join(route)
              + (f'  | {route[0]}에서 {a.spin:.0f}° 회전' if a.start and a.spin > 0 else ''))
     if faces:

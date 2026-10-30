@@ -67,6 +67,9 @@ class FakeRobot:
         self.prec_pending = False
 
     def guide(self, req):
+        if req['action'] == 'end':          # 안내 끝 (LED 끄기): 따로 셈
+            self.guide_ends = getattr(self, 'guide_ends', 0) + 1
+            return
         self.guides.append((req['action'], req['node'], self.yaw))
 
     def guide_cancel(self):
@@ -222,6 +225,38 @@ def test_nav_retry_then_ok():
     assert reached(r) == ['T1'] and not d.error
 
 
+def test_nav_false_success_far_from_node_resends():
+    # 실측 (node_tour hall): N1에서 N2로 목표를 바꾸자마자 Nav2가 '성공' -> 34 cm 떨어져서 도착 처리됨
+    # -> 노드에서 nav_ok_tol(10 cm)보다 멀면 믿지 않고 다시 보냄, 진짜로 와야 도착
+    r, d = make(1.806, -0.802, math.pi, last_drive=FORWARD)
+    sent = []
+    nav_go = r.nav_go
+    r.nav_go = lambda x, y, yaw: (sent.append((x, y)), nav_go(x, y, yaw))
+    d.on_move(81, False, FORWARD, [('N2', 1.456, -0.821, 2.7)], False, 'N2')
+    d.tick(0.0, (r.x, r.y, r.yaw))
+    d.on_nav_result(True)                       # 옛 목표 성공이 새 목표 결과로 옴
+    d.tick(0.05, (r.x, r.y, r.yaw))
+    assert reached(r) == [] and len(sent) == 2   # 도착 아님, 다시 보냄
+    run(r, d, 5, t0=0.1)
+    assert reached(r) == ['N2'] and math.hypot(r.x - 1.456, r.y + 0.821) < 0.01
+
+
+def test_obstacle_ignored_while_turning_at_goal():
+    # 도착지(N7)에 와서 테이블 모서리 쪽으로 도는 중: 앞에 테이블이 들어와도 멈추지 않음 (BLOCKED 안 냄)
+    r, d = make(0.584, -0.40, math.pi / 2, last_drive=FORWARD)
+    d.on_move(82, False, FORWARD, [('N7', 0.583, -0.364, -0.31)], False, 'N7')
+
+    def hook(t):
+        d.set_obstacle('STATIC' if t >= 0.1 else '')
+    run(r, d, 5, hook=hook)
+    assert [e for e in r.events if e[0] == EV_BLOCKED] == [] and reached(r) == ['N7']
+    # 지나가는 길 한가운데(노드에서 멀 때)는 그대로 멈춤
+    r2, d2 = make(0.584, -0.80, math.pi / 2, last_drive=FORWARD)
+    d2.on_move(83, False, FORWARD, [('N7', 0.583, -0.364, -0.31)], False, 'N7')
+    run(r2, d2, 6, hook=lambda t: d2.set_obstacle('STATIC'))
+    assert len([e for e in r2.events if e[0] == EV_BLOCKED]) == 1
+
+
 def test_obstacle_class():
     c = ObstacleClass()
     assert c.update(0.0, 0.15) == 'UNKNOWN'
@@ -306,6 +341,16 @@ def test_guide_guest_lost_stops_and_reports():
     assert fails == [('N1', 'guest_lost:N1:not_seen')]
     assert reached(r) == ['N1']
     assert d.phase == 'idle' and not d.error and len(d.queue) == 0 and not d.in_guide
+
+
+def test_guide_end_sends_led_off():
+    # 안내 Move 뒤 안내가 아닌 Move(복귀)가 오면 guide end (LED 끄기)
+    r, d = make(1.841, -0.854, math.pi, last_drive=FORWARD)
+    d.on_move(95, False, FORWARD, [('N2', 1.456, -0.821, 3.12)], True, 'N2')
+    run(r, d, 15, hook=auto_ok(r, d))
+    assert d.in_guide
+    d.on_move(96, False, FORWARD, [('N1', 1.786, -0.820, 0.0)], False, 'N1')
+    assert getattr(r, 'guide_ends', 0) == 1 and not d.in_guide
 
 
 def test_guide_resend_does_not_greet_again_and_serve_never_greets():
@@ -680,6 +725,22 @@ def test_corridor_d3_undock_to_p1():
     assert [n for t, n, _ in r.events if t == CMD_DONE] == ['P1']
 
 
+def test_corridor_p1_pass_through_to_d1():
+    # D3에서 P1을 지나 D1로 (배급 없이 공석 채우기): 통로 끝 then = tape pass_through (가로선 -> 시계 90 -> 새 선)
+    # -> P1을 '도착'으로 치되 tape를 한 것으로 남기지 않음, 빼기(tape_exit) 없음, N4까지 장애물 정지 끔 -> Nav2 N4
+    r, d = corr_make()
+    r.x, r.y, r.yaw = NODES['D3'] + (3.1416,)
+    d.last_node, d.leave_from, d.last_drive = 'D3', 'D3', REVERSE
+    d.on_move(86, False, REVERSE, wp('N15', 'N16', 'P2', 'P1'), False, 'D1')
+    d.on_move(86, True, FORWARD, [('N4', 3.000, 2.600, 3.1416)], False, 'D1')
+    corr = [q for q in []]
+    run(r, d, 40)
+    corr = [q for q in r.reqs if q['method'] == 'corridor']
+    assert corr and corr[-1]['then'] and corr[-1]['then'].get('pass_through') is True
+    assert 'P1:tape_exit' not in r.prec and d.prec_done_node == ''
+    assert reached(r)[-2:] == ['P1', 'N4']
+
+
 def test_corridor_old_n14_align_keeps_turn():
     # 예전 N14 설정 (hold_axis 없음): 정렬 뒤 축 없이 예전처럼 돌고 cmd_vel 후진
     r, d = make(3.023, 1.200, 0.0, last_drive=FORWARD)
@@ -741,6 +802,24 @@ def test_table_from_node_faces_table_edge():
                                   ('N3', 0.979, -0.815, 3.12)], False, 'N3')
     run(r2, d2, 25)
     assert yaws2[0] == 3.12 and r2.prec == []
+
+
+def test_table_look_node_pass_goes_on_lane():
+    # T1 좌표 = 테이블 모서리(차선 밖). 지나가기만 하면 Nav2는 N2 -> N3 직선 위 점으로 (테이블로 안 파고듦)
+    stops = dict(STOPS)
+    stops['T1'] = {'method': 'table', 'from': {'N2': {'marker': 11, 'target': 't1l'}}}
+    r, d = make(1.786, -0.820, math.pi, last_drive=FORWARD)
+    d.stops = stops
+    goals = []
+    nav_go = r.nav_go
+    r.nav_go = lambda x, y, yaw: (goals.append((round(x, 3), round(y, 3))), nav_go(x, y, yaw))
+    d.on_move(90, False, FORWARD, [('N2', 1.456, -0.821, 3.12), ('T1', 1.217, -0.929, 3.12),
+                                  ('N3', 0.979, -0.815, 3.12)], False, 'N3')
+    run(r, d, 25)
+    assert reached(r) == ['N2', 'T1', 'N3'] and r.prec == []
+    t1 = goals[1]
+    assert abs(t1[1] - (-0.818)) < 0.005 and abs(t1[0] - 1.217) < 0.005   # 직선 위 (y -0.82 근처), 모서리(-0.929) 아님
+    assert min(abs(r_y + 0.929) for r_y in [g[1] for g in goals]) > 0.05
 
 
 def test_table_pass_through_when_not_goal():
@@ -806,6 +885,21 @@ def test_localize_fwd_spin_back_then_event():
     assert max(xs) > 1.12                              # 앞으로 나왔다가
     assert abs(r.x - 1.0) < 0.02 and abs(r.y - 1.0) < 0.02   # 원래 자리로
     assert abs(wrap(r.yaw)) < 0.2 and d.phase == 'idle' and d.loc is None
+
+
+def test_localize_redock_with_marker_for_dock_in():
+    # 도크(D3 dock_in)면 되돌아갈 때 시간 후진 대신 docking redock (앞 마커 보며 기록 자리로 주차) -> LOCALIZED
+    r, d = make(1.0, 1.0, 0.0)
+    d.stops = dict(STOPS, D3={'method': 'dock_in', 'marker': 3, 'stop': 'n15', 'target': 'd3'})
+    d.last_node = 'D3'
+    reqs = []
+    precision = r.precision
+    r.precision = lambda req: (reqs.append(dict(req)), precision(req))
+    d.on_control(LOCALIZE)
+    run(r, d, 25)
+    assert [q['method'] for q in reqs] == ['redock'] and reqs[0]['kind'] == 'dock_in' and reqs[0]['marker'] == 3
+    assert [(n, why) for t, n, why in r.events if t == LOCALIZED] == [('D3', '')]
+    assert d.phase == 'idle' and d.loc is None
 
 
 def test_localize_busy_when_moving():

@@ -282,7 +282,7 @@ class Driver:
 
     def __init__(self, io, stops, pass_tol=0.08, yaw_tol=0.15, done_grace=0.5, reverse=None, policy=None,
                  nav_retries=1, check_turn_deg=45.0, check_gap=0.8, corridor=True,
-                 loc_fwd=0.15, loc_speed=0.05, loc_spin_deg=360.0, loc_w=0.6, loc_settle=1.0):
+                 loc_fwd=0.15, loc_speed=0.05, loc_spin_deg=360.0, loc_w=0.6, loc_settle=1.0, nav_ok_tol=0.10):
         self.io = io
         # 위치 맞추기 (Control LOCALIZE): 앞으로 fwd -> 제자리 spin_deg -> settle초 멈춤 -> 뒤로 fwd -> LOCALIZED
         #   노드별 값은 precision_stops <노드>.localize: {fwd, spin_deg} (없으면 이 기본값)
@@ -314,6 +314,8 @@ class Driver:
         self.now = 0.0
         self.nav_retries = nav_retries  # Nav2 실패 때 다시 보내는 횟수 (그래도 안 되면 CMD_FAILED)
         self.nav_tries = 0
+        self.nav_ok_tol = nav_ok_tol    # Nav2가 성공이라는데 노드에서 이보다 멀면 믿지 않고 다시 보냄 (목표 바꿀 때 옛 목표 성공이 섞임)
+        self.nav_far_tries = 0
         self.prec_detail = ''         # 정밀 정차 실패 이유 -> CMD_DONE.reason
         self.guide_state = ''         # '' / running / ok / fail
         self.guide_detail = ''
@@ -347,6 +349,8 @@ class Driver:
         if not waypoints:
             return
         if not guide:
+            if self.in_guide:
+                self.io.guide({'action': 'end', 'node': self.last_node})   # 안내 끝: LED 끄기
             self.in_guide = False     # 안내가 끝났다 (복귀 · 서빙)
         if not append:  # REPLACE: 지금 가던 것까지 버리고 새로
             if self.loc is not None:
@@ -405,7 +409,7 @@ class Driver:
 
     def on_precision_result(self, ok, detail='', info=None):
         if self.phase in ('align', 'precision', 'leave', 'tape_approach', 'corridor_approach', 'table_approach',
-                          'entrance_approach') \
+                          'entrance_approach', 'localize') \
                 and self.prec_state == 'running':
             self.prec_state = 'ok'
             self.prec_ok = ok
@@ -413,6 +417,8 @@ class Driver:
             self.prec_result = detail     # 통로: ok여도 'timeout...'이면 실패로 봄
             if not ok and self.phase == 'corridor_approach':
                 self.io.log(f'통로 docking 실패: {detail}')
+            elif not ok and self.phase == 'localize':
+                self.io.log(f'위치 맞추기 다시 주차 실패: {detail}')
             elif not ok:
                 self.io.log(f'정밀 정차 실패, Nav2 위치로 진행: {detail}')
                 self.prec_detail = f'{self.cur.node_id if self.cur else ""}:{detail}'
@@ -463,6 +469,8 @@ class Driver:
         if pose is None or self.paused or self.error:
             return
         moving = self.phase in ('nav', 'reverse') and not self.quiet_obstacle   # 정밀 동작(tape 등) 중에는 장애물 판단 안 함
+        if moving and self.phase == 'nav' and self._turning_at_goal(pose):
+            moving = False   # 도착지에 와서 방향만 맞추는 중 (테이블 모서리 보기): 앞에 테이블이 있는 게 정상
         if moving or self.holding:
             ask, report = self.policy.update(now, self.obstacle)
             if self.obstacle:
@@ -589,8 +597,8 @@ class Driver:
                     self.io.log(f'통로: {reached}에서 섬, {names[idx + 1:]}는 다시 넘겨받기')
                     self.queue.steps[0:0] = steps[idx + 1:]
                 then_done = self.prec_info.get('then_done', bool(req.get('then')) and idx == len(steps) - 1)
-                if then_done:
-                    self.prec_done_node = self.cur.node_id   # tape / dock_in을 이미 함
+                if then_done and not (req.get('then') or {}).get('pass_through'):
+                    self.prec_done_node = self.cur.node_id   # tape / dock_in을 이미 함 (지나가기면 안 침)
                 self._reached(pose)
         elif self.phase == 'localize':
             self._tick_localize(pose)
@@ -603,19 +611,30 @@ class Driver:
     # ------------------------------------------------------------ 내부
     
     def _tick_nav(self, pose):
-        d = math.hypot(self.cur.x - pose[0], self.cur.y - pose[1])
+        tx, ty = self._nav_xy()
+        d = math.hypot(tx - pose[0], ty - pose[1])
         nxt = self.queue.steps[0] if len(self.queue) else None
         if nxt and nxt.drive == FORWARD and d < self.pass_tol and not self._is_check(self.cur, nxt) and not self._table_next(nxt):
             self._reached(pose)  # 중간 노드: 위치만 통과, 다음 목표로 바로 (손님 확인 노드는 끝까지 가서 선다)
             return
         if self.nav_state == 'ok':
+            if d > self.nav_ok_tol and self.nav_far_tries < 3:
+                # 실측: 지나간 노드(N1 · T1)에서 새 목표로 바꾸는 순간 Nav2가 옛 목표 성공을 새 목표 결과로 돌려줌 (26~35 cm 떨어져서 '도착')
+                self.nav_far_tries += 1
+                self.io.log(f'Nav2 성공인데 {self.cur.node_id}까지 {d * 100:.0f} cm -> 믿지 않고 목표 다시 보냄 '
+                            f'({self.nav_far_tries}/3)')
+                self.nav_state = 'running'
+                self.io.nav_go(*self._nav_xy(), self._nav_yaw())
+                return
+            if d > self.nav_ok_tol:
+                self.io.log(f'Nav2 성공, {self.cur.node_id}까지 {d * 100:.0f} cm (다시 보내도 같음 -> 도착으로 침)')
             self._reached(pose)
         elif self.nav_state == 'fail':
             if self.nav_tries < self.nav_retries:  # 한 번 더 보내 본다
                 self.nav_tries += 1
                 self.io.log(f'Nav2 실패: {self.cur.node_id} -> 다시 시도 ({self.nav_tries}/{self.nav_retries})')
                 self.nav_state = 'running'
-                self.io.nav_go(self.cur.x, self.cur.y, self._nav_yaw())
+                self.io.nav_go(*self._nav_xy(), self._nav_yaw())
                 return
             self.io.log(f'Nav2 실패: {self.cur.node_id}')
             self.io.event(CMD_FAILED, self.queue.cmd_id, self.cur.node_id, 'nav2_failed')
@@ -707,8 +726,9 @@ class Driver:
             self.phase = 'nav'  # nav_go 결과가 바로 와도 받을 수 있게 먼저
             self.nav_state = 'running'
             self.nav_tries = 0
+            self.nav_far_tries = 0
             self.io.direction('FORWARD')
-            self.io.nav_go(self.cur.x, self.cur.y, self._nav_yaw())
+            self.io.nav_go(*self._nav_xy(), self._nav_yaw())
         else:
             if self.axis is not None and self.corridor and self._corridor_handover(pose):
                 return
@@ -730,7 +750,7 @@ class Driver:
             return
         if self.phase == 'nav':
             self.nav_state = 'running'
-            self.io.nav_go(self.cur.x, self.cur.y, self._nav_yaw())
+            self.io.nav_go(*self._nav_xy(), self._nav_yaw())
         elif self.phase == 'precision' or self.phase == 'align':
             self._request_precision(self.phase == 'align')
         elif self.phase == 'tape_approach':
@@ -764,7 +784,10 @@ class Driver:
         self.io.event(NODE_REACHED, step.cmd_id, step.node_id, '')
         nxt = self.queue.steps[0] if len(self.queue) else None
         check = self._is_check(step, nxt)
-        self.prev_xy = (step.x, step.y)
+        self.prev_xy = self._nav_xy()       # 바라보기 노드(T)를 지나갔으면 차선 위 점 (다음 계산의 기준)
+        if not self._at_goal(step) and (self.stops.get(step.node_id, {}).get('leave') or {}).get('quiet_to_next'):
+            self.quiet_obstacle = True      # P1을 지나가기만 해도 빠질 때처럼 다음 노드(N4)까지 LiDAR 정지 끔 (좁은 틈)
+            self.io.log(f'{step.node_id} 지나감: 다음 노드까지 장애물 정지 끔 (quiet_to_next)')
         if check:
             self._begin_check(pose)
             return
@@ -818,6 +841,33 @@ class Driver:
     def _precise_here(self, step):
         """정밀 정차(dock · tape)를 할 곳인가: 도착지이고 안내가 아닐 때 (안내는 Nav2 위치 · yaw로만 섬)"""
         return self._at_goal(step) and not step.guide
+
+    def _is_look(self, step):
+        """바라보기용 노드인가 (테이블 T: 좌표 = 테이블 모서리, 지나가는 길이 아님). precision_stops method table"""
+        return step is not None and self.stops.get(step.node_id, {}).get('method') == 'table'
+
+    def _nav_xy(self):
+        """Nav2 목표 위치. 바라보기용 노드(테이블 T)를 지나가기만 할 때는 앞 노드 -> 그다음 길 노드 직선 위로 내린 점
+        (T 좌표는 테이블 모서리라 그대로 가면 테이블로 파고듦). 도착지이거나 길 노드면 노드 좌표 그대로"""
+        cur = self.cur
+        if cur is None or not self._is_look(cur) or self._at_goal(cur) or self.prev_xy is None:
+            return (cur.x, cur.y) if cur is not None else (0.0, 0.0)
+        nxt = next((st for st in self.queue.steps if not self._is_look(st)), None)
+        if nxt is None or nxt.drive != FORWARD:
+            return cur.x, cur.y
+        ax, ay = self.prev_xy
+        bx, by = nxt.x, nxt.y
+        L2 = (bx - ax) ** 2 + (by - ay) ** 2
+        if L2 < 1e-6:
+            return cur.x, cur.y
+        t = max(0.0, min(1.0, ((cur.x - ax) * (bx - ax) + (cur.y - ay) * (by - ay)) / L2))
+        return ax + t * (bx - ax), ay + t * (by - ay)
+
+    def _turning_at_goal(self, pose):
+        """Nav2 마지막 노드(줄 끝)에 pass_tol 안으로 와서 제자리에서 방향만 맞추는 중인가 (앞으로는 더 안 감)"""
+        if self.cur is None or len(self.queue) or self.cur.drive != FORWARD:
+            return False
+        return math.hypot(self.cur.x - pose[0], self.cur.y - pose[1]) < self.pass_tol
 
     def _nav_yaw(self):
         """Nav2 목표 yaw: 다음이 정밀 정차할 테이블(도착지)이고 precision_stops에 face(테이블 모서리)가 있으면
@@ -911,9 +961,26 @@ class Driver:
             if done:
                 L['wait'] -= dt
                 if L['wait'] <= 0.0:
-                    L['stage'], L['done'] = 'back', 0.0
+                    stop = self.stops.get(self.last_node, {})
+                    if stop.get('method') in ('entrance', 'dock_in') and stop.get('redock', True):
+                        # 되돌아갈 때 그냥 시간 후진 대신 앞 마커를 보며 기록 자리로 주차 (docking redock)
+                        self.io.cmd_vel(0.0, 0.0)
+                        L['stage'] = 'redock'
+                        self.prec_state = 'running'
+                        self.io.log(f'위치 맞추기: {self.last_node}로 마커 보며 다시 주차 (redock)')
+                        self.io.precision(dict(stop, method='redock', kind=stop.get('method'), node=self.last_node,
+                                               timeout=float(stop.get('redock_timeout', 60))))
+                    else:
+                        L['stage'], L['done'] = 'back', 0.0
+        elif st == 'redock':
+            if self.prec_state == 'ok':
+                self.prec_state = ''
+                self._localize_end('' if self.prec_ok else f'redock:{self.prec_result}')
 
     def _localize_end(self, reason):
+        if self.loc is not None and self.loc.get('stage') == 'redock' and self.prec_state == 'running':
+            self.prec_state = ''
+            self.io.precision_cancel()        # 다시 주차 중에 취소 · 새 명령
         self.io.cmd_vel(0.0, 0.0)
         self.loc = None
         if self.phase == 'localize':
@@ -932,6 +999,12 @@ class Driver:
         for i, st in enumerate(run):
             last = i == len(run) - 1 and rest == 0
             at_goal = (st.node_id == st.goal) if st.goal else last
+            if (i == len(run) - 1 and st.goal and not at_goal and not st.guide):
+                stop = self.stops.get(st.node_id, {})
+                if stop.get('method') == 'tape' and stop.get('corridor', True) and stop.get('pass_through', True):
+                    # P1을 지나가기만 (배급 없이 D1 공석 채우기 등): 가로선(검검검) -> x_after -> 시계 90 -> 새 선까지 나옴
+                    # -> 그다음 Nav2 (삽입 · 빼기 없음). P1 좌표에서 돌면 통로 벽에 걸려 못 감
+                    return i, dict(stop, node=st.node_id, pass_through=True)
             if at_goal and not st.guide:
                 stop = self.stops.get(st.node_id, {})
                 if stop.get('method') in ('tape', 'dock_in') and stop.get('corridor', True):
@@ -1082,6 +1155,7 @@ class Driver:
         self.guide_state = ''
         self.phase = 'idle'
         self.io.direction('STOP')
+        self.io.guide({'action': 'end', 'node': node})   # LED 끄기
 
     def _stop_motion(self, keep=False, keep_dir=False):
         self.io.cmd_vel(0.0, 0.0)

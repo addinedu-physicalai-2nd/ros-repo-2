@@ -162,6 +162,8 @@ class DockingNode(Node):
                 result = self.run_entrance(req, out=False)
             elif method == 'entrance_exit':
                 result = self.run_entrance(req, out=True)
+            elif method == 'redock':
+                result = self.run_redock(req)
             elif method == 'table':
                 result = self.run_table(req)
             elif method == 'table_exit':
@@ -261,7 +263,8 @@ class DockingNode(Node):
             return '성공'
         node = (plan.get('nodes') or [reached])[-1]
         if then.get('method') == 'tape':
-            md.log(f'[{node}] tape: 가로선 -> X -> 시계 90 -> 동 선까지 삽입')
+            md.log(f'[{node}] tape: 가로선 -> X -> 시계 90 -> '
+                   + ('넣지 않고 새 선까지 (지나가기)' if then.get('pass_through') else '동 선까지 삽입'))
             result = LineDocker(self, self.cmd_pub, self.cancelled, self.tf_buf, self.ir).run(
                 dict(then, approach=True, approach_max=float(then.get('approach_max', 0.6))))
         elif then.get('method') == 'dock_in':
@@ -280,6 +283,25 @@ class DockingNode(Node):
             st.follow_walls(float(req['travel']), f'통로 -> {req.get("node")}')   # 가로선 앞 (또는 가로선)까지
             req = dict(req, approach=True, approach_max=float(req.get('approach_max', 0.8)))
         return LineDocker(self, self.cmd_pub, self.cancelled, self.tf_buf, self.ir).run(req)
+
+    def run_redock(self, req):
+        """위치 맞추기(LOCALIZE) 끝: 도크 앞으로 나와 한 바퀴 돈 뒤, 앞 마커를 보며 기록 자리로 다시 주차
+        D1 (kind entrance): 앞 벽 수직 -> 마커 1 거리로 곧게 후진 (= 들어가기 마지막 단계)
+        D2 · D3 (kind dock_in): 도크 마커로 줄 자세(stop) 맞추고 -> 기록(target)까지 후면 주차 (= dock_in 마지막 단계)"""
+        node, kind = req.get('node'), req.get('kind')
+        if kind == 'entrance':
+            st = self.steps(1, f'{node}_redock', cls=Entrance)
+            md.log(f'[{node}] 위치 맞추기 뒤 다시 주차 (마커 1)')
+            md.log(f'결과: {st.redock()}')
+            return '성공'
+        if kind == 'dock_in':
+            marker = int(req['marker'])
+            st = self.steps(marker, f'{node}_redock')
+            md.log(f'[{node}] 위치 맞추기 뒤 다시 주차 (마커 {marker})')
+            st.park(marker, _load(f'~/dock_target_{req["stop"]}.json'), _load(f'~/dock_target_{req["target"]}.json'),
+                    str(node))
+            return '성공'
+        return f'실패: redock 모르는 kind {kind}'
 
     def run_dock_in(self, req):
         st = self.steps(int(req['marker']), f'{req.get("node")}_dock_in')

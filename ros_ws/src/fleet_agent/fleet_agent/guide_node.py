@@ -23,7 +23,7 @@ from rclpy.qos import QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import CompressedImage, Image
 from std_msgs.msg import String
 
-from .guide_effects import play
+from .guide_effects import leds_off, play
 
 
 class GuideNode(Node):
@@ -95,7 +95,11 @@ class GuideNode(Node):
         if self.job:
             self.job[3].set()            # 새 요청이 오면 이전 것은 그만
         if action == 'arrive':
-            self.effect('arrived')
+            self.effect('arrived')      # 효과 끝에 LED 끔 (play finally)
+            return
+        if action == 'end':             # 안내 끝 (손님 놓침 · 취소 · 복귀): LED 확실히 끔
+            if self.effects:
+                threading.Thread(target=leds_off, args=(self.get_logger().info,), daemon=True).start()
             return
         if action not in ('greet', 'watch'):
             return

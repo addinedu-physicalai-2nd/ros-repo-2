@@ -15,6 +15,8 @@ E자 테이프 (지도 방향: 북쪽 위, 픽업대 오른쪽)
          -> 선을 세어 서 선 '다음' 선(동 선)에서 정지 = 바구니가 픽업대 위
             (출발 때 이미 서 선 위면 그게 서 선. 로봇이 좌우로 몇 cm 어긋나도 같은 선에서 선다)
   leave: 서쪽으로 전진 -> 출발한 동 선은 빼고 선을 세어 exit_legs번째(기본 2 = 새 선)에서 정지
+  지나가기 (pass_through, P1이 도착지가 아님 = 배급 없이 D1 등으로): 가로선 -> x_after -> 시계 90 -> 넣지 않고
+         앞으로 새 선까지 (= 빼기 끝 자리) -> 그다음 Nav2
   선 세기: 검검검이 연속 2번이면 선 하나, 그 뒤 흰흰흰으로 1 cm 넘게 가야 다음 선 (선 가장자리 깜빡임 무시)
 
 바닥 센서: /ir_sensor/range (pinky_sensor_adc main_node), 바닥 230~250 / 테이프 4050~4095
@@ -37,6 +39,7 @@ DEFAULTS = {
     'min_white': 0.01,       # 선 사이로 보려면 이만큼 흰색이 이어져야 (선 가장자리 깜빡임 무시)
     'exit_legs': 2,          # 빼기: 몇 번째 선에서 멈추나 (1 = 서 선, 2 = 새 선)
     'exit_max': 0.35,
+    'pass_legs': 1,          # 지나가기: 서 선(밟은 채 시작) 다음 몇 번째 선에서 멈추나 (1 = 새 선)
     'v_search': 0.05,        # m/s
     'accel': 0.35,           # m/s^2 가감속 제한
 }
@@ -182,6 +185,8 @@ class LineDocker:
         e = mv.dk.rotate_to(wrap(h - math.pi / 2))
         h_ins = wrap(h - math.pi / 2)
         time.sleep(0.1)
+        if req.get('pass_through'):
+            return self._pass_out(mv, c, h_ins, e)
         legs = Legs(c['min_white'], sum(mv.blacks()) == 3)
         st = {'m': 0.0 if legs.black else None, 'done': False, 'why': ''}
 
@@ -201,6 +206,23 @@ class LineDocker:
             return f'실패: 선을 못 찾음 ({s * 100:.1f} cm 후진, 서 선 {"봄" if st["m"] is not None else "못 봄"})'
         m_txt = f'{st["m"] * 100:.1f}' if st['m'] is not None else '-'
         self.log(f'[tape] 시계 90° (남은 {e:+.1f}°) -> 서 선 {m_txt} cm, {st["why"]} {s * 100:.1f} cm에서 정지')
+        return '성공'
+
+    def _pass_out(self, mv, c, h, e):
+        """P1을 지나가기만 (배급 없음): 시계 90 뒤 넣지 않고 앞으로 새 선까지 (빼기 끝 자리와 같음) -> 그다음 Nav2"""
+        legs = Legs(c['min_white'], sum(mv.blacks()) == 3)    # 지금 밟은 서 선은 안 셈
+        st = {'done': False}
+        need = int(c.get('pass_legs', 1))
+
+        def ev(b, armed, s):
+            if not st['done'] and legs.update(b, s) and legs.count >= need:
+                st['done'] = True
+            return st['done']
+        why, s, _ = mv.drive(c['exit_max'], False, h, c['v_search'], event=ev, confirm=1)
+        if why != 'event':
+            self.log(f'[tape 지나가기] 시계 90° (남은 {e:+.1f}°), 새 선 못 봄 ({s * 100:.1f} cm 전진) -> 그 자리에서 Nav2')
+            return '성공'
+        self.log(f'[tape 지나가기] 시계 90° (남은 {e:+.1f}°) -> 넣지 않고 {s * 100:.1f} cm 전진, 새 선에서 정지 -> Nav2')
         return '성공'
 
     def leave(self, req):

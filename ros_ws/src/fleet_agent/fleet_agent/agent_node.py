@@ -72,7 +72,8 @@ class FleetAgent(Node):
                              check_gap=p('guide_check_gap_m', 0.8).value,
                              corridor=p('corridor_handover', True).value,
                              loc_fwd=p('localize_fwd_m', 0.15).value, loc_speed=p('localize_speed', 0.05).value,
-                             loc_spin_deg=p('localize_spin_deg', 360.0).value, loc_w=p('localize_w', 0.6).value)
+                             loc_spin_deg=p('localize_spin_deg', 360.0).value, loc_w=p('localize_w', 0.6).value,
+                             nav_ok_tol=p('nav_ok_tolerance', 0.10).value)
         self.driver.last_node = self.start_node
         self.driver.leave_from = self.start_node   # 켤 때 선 노드에 leave(언도킹 등)가 있으면 첫 출발 때 먼저
 

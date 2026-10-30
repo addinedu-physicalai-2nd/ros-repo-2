@@ -53,32 +53,33 @@ D2:  {method: dock_in, marker: 2, stop: n16, target: d2, timeout: 70,    # N16 �
 D3:  {method: dock_in, marker: 3, stop: n15, target: d3, timeout: 70,    # N15 옆. 기록: dock_record all
       leave: {method: undock, marker: 3, target: n15, to: N15, turn_deg: 90, hold_axis: true}}
 
-P1:  {method: tape, x_after: 0.035, timeout: 60, ir_black: 3800,          # 바구니(뒤)를 주방 픽업대에 넣음 (E자 테이프)
+P1:  {method: tape, x_after: 0.04, timeout: 60, ir_black: 3800,           # 바구니(뒤)를 주방 픽업대에 넣음 (E자 테이프). x_after 3.5 -> 4 cm
       leave: {method: tape_exit, exit_legs: 2, quiet_to_next: true, ir_black: 3800}}  # 받은 뒤 새 선까지 빼고 Nav2 (N4)
 
 # 테이블: 직전 노드(from = 들어온 노드)에서 Nav2로 서고 (서버 yaw = 들어가는 방향) -> docking table:
 #   기록에서 계산한 방향으로 돌아 다리 마커 찾기 · 가운데 맞추기 · 측정 -> 차선 올라타기
 #   -> 정렬 시작부터 lines번째 바닥 선에서 정지 -> CMD_DONE
 #   마커 ID = 테이블 번호 + 1(왼쪽) / 2(오른쪽), 기록 = ~/dock_target_<target>.json (table_align.py --record-lane)
-#   face: [x, y] = 테이블 모서리 (통로 쪽 짧은 변, 두 다리 가운데. 맵 v5). 직전 노드에서 이 점을 보고 섬
-#         (fleet_agent core._nav_yaw. 없으면 서버 yaw = 다음 노드 쪽). 노드 좌표(T)는 차선 위라 따로 둠
+#   T 노드 좌표 = 테이블 모서리 (node_graph). 직전 N에서 서버 yaw(= 다음 노드 T 쪽)로 서서 모서리를 봄.
+#   T를 지나가기만 할 때는 fleet_agent가 N-N 직선 위로 감 (core._nav_xy: 이 파일의 method table 노드가 대상)
+#   (face: [x, y]를 주면 T 좌표 대신 그 점을 봄. 지금은 안 씀)
 #   leave table_exit: 서빙 뒤 지금 방향으로 dist(m) 전진 -> 그다음 Nav2 (costmap 경계 벗어나기)
 #   (docking_node의 table · table_exit는 table_dock.py 구현 뒤 동작. 그 전엔 실패 -> Nav2 위치 인정)
-T1: {method: table, lines: 2, timeout: 60, face: [1.217, -0.929],
+T1: {method: table, lines: 2, timeout: 60,
      from: {N2: {marker: 11, target: t1l}, N3: {marker: 12, target: t1r}},
      leave: {method: table_exit, dist: 0.1}}
-T2: {method: table, lines: 2, timeout: 60, face: [0.754, -0.904],
+T2: {method: table, lines: 2, timeout: 60,
      from: {N3: {marker: 21, target: t2l}, N4: {marker: 22, target: t2r}},
      leave: {method: table_exit, dist: 0.1}}
-T3: {method: table, lines: 2, timeout: 60, face: [1.242, -0.455],
+T3: {method: table, lines: 2, timeout: 60,
      from: {N5: {marker: 31, target: t3l}, N6: {marker: 32, target: t3r}},
      leave: {method: table_exit, dist: 0.1}}
-T4: {method: table, lines: 2, timeout: 60, face: [0.792, -0.430],
+T4: {method: table, lines: 2, timeout: 60,
      from: {N6: {marker: 41, target: t4l}, N7: {marker: 42, target: t4r}},
      leave: {method: table_exit, dist: 0.1}}
-T5: {method: table, lines: 2, timeout: 60, face: [1.267, -0.005],
+T5: {method: table, lines: 2, timeout: 60,
      from: {N8: {marker: 51, target: t5l}, N9: {marker: 52, target: t5r}},
      leave: {method: table_exit, dist: 0.1}}
-T6: {method: table, lines: 2, timeout: 60, face: [0.792, -0.005],
+T6: {method: table, lines: 2, timeout: 60,
      from: {N9: {marker: 61, target: t6l}, N10: {marker: 62, target: t6r}},
      leave: {method: table_exit, dist: 0.1}}

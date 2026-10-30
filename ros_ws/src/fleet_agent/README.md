@@ -166,10 +166,21 @@ CMD_DONE 바로 앞에, undock / entrance_exit(빠지기)가 끝나면 `UNDOCKED
 시스템 시작 전에 서버가 한 대씩 보낸다 (`main_service/launch/system.launch.xml`). 쉬는 중일 때만 한다 (아니면 `LOCALIZED reason=busy`)
 1. 앞으로 `fwd`(기본 0.15 m, `localize_speed` 0.05 m/s) — 도크 벽에서 떨어져 돌 자리 확보
 2. 제자리 `spin_deg`(기본 360°) — AMCL이 주변을 다 보고 위치를 맞춤. 회전 · 직진 방향은 odom yaw (AMCL 보정이 안 섞임)
-3. 처음 방향으로 맞추고 1초 멈춤 → 같은 거리만큼 뒤로 (거리 = 속도 x 시간, 지도 좌표는 AMCL 보정으로 튀어서 안 씀)
+3. 처음 방향으로 맞추고 1초 멈춤 → 다시 주차: 도크가 `entrance`(D1) · `dock_in`(D2 · D3)이면 docking `redock`이 앞 마커를 보며
+   기록 자리로 후진 (D1 = 앞 벽 수직 + 마커 1 거리, D2 · D3 = 도크 마커로 줄 자세 -> 후면 주차). 그 밖은 같은 거리만큼 시간 후진
+   (`precision_stops <도크>.redock: false`면 시간 후진)
 4. `RobotEvent LOCALIZED` (reason 비면 성공)
 - 노드별 값: `precision_stops.yaml`의 `<도크>.localize: {fwd: 0.15, spin_deg: 360}` (없으면 `fleet_agent.yaml` 기본값)
 - PAUSE면 멈췄다 RESUME에 이어서, CANCEL이면 그만두고 `LOCALIZED reason=cancel`. LiDAR 장애물 정지는 안 씀 (조금만 움직임)
+
+## 테이블 T · P1 지나가기 · 안내 LED
+
+- 테이블 T1~T6 좌표 = 테이블 모서리 (바라보기용, node_graph). 테이블이 도착지면 직전 N에서 서버 yaw(= T 쪽)로 서서 모서리를 봄.
+  길 연결(N2 -> T1 -> N3)은 그대로라 서버 lock은 서빙 중인 로봇의 차선을 막고, T를 지나가기만 할 때는
+  fleet_agent가 앞 N -> 다음 N 직선 위로 내린 점으로 감 (`core._nav_xy`, precision_stops의 method table 노드가 대상)
+- P1을 지나가기만 (배급 없이 D2 · D3 -> D1 공석 채우기): 통로 끝 then = tape `pass_through` -> 가로선(검검검) -> x_after(4 cm)
+  -> 시계 90 -> 넣지 않고 새 선까지 (= 빼기 끝 자리) -> Nav2 N4. P1의 `leave.quiet_to_next`대로 N4까지 장애물 정지 끔
+- 안내 끝 (안내가 아닌 Move가 오거나 손님 놓침): guide 노드에 `end` -> LED 끔. 효과(play)도 끝나면 실패해도 LED 끔
 
 ## 한 번에 켜기 (robot_system.launch.xml)
 
