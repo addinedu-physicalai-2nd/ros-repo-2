@@ -13,17 +13,26 @@
     <span id="conn" class="conn">연결 중</span>
   </header>
 
+  <!-- 서버 연결이 끊기면 -->
+  <div id="offline" class="offline" hidden>서버에 다시 연결하는 중이에요. 잠시만 기다려 주세요</div>
+
   <!-- 1. 좌석 배치도에서 테이블 고르기 -->
   <section id="pickView" class="pick">
-    <div class="floor-wrap">
+    <div class="floor-card">
       <div id="floor" class="floor"></div>
-    </div>
-    <aside class="panel">
-      <h1 id="pickTitle">원하시는 자리를<br>골라 주세요</h1>
-      <p id="pickSub" class="hint">빈자리를 누르면 로봇이 안내해 드려요</p>
       <div class="legend">
         <span><i class="sw free"></i>빈자리</span>
         <span><i class="sw busy"></i>사용 중</span>
+        <span><i class="sw sel"></i>고른 자리</span>
+      </div>
+    </div>
+    <aside class="panel">
+      <p id="freeCount" class="eyebrow"></p>
+      <h1 id="pickTitle">원하시는 자리를<br>골라 주세요</h1>
+      <p id="pickSub" class="hint">빈자리를 누르면 로봇이 안내해 드려요</p>
+      <div id="selCard" class="sel-card" hidden>
+        <span class="sel-label">고른 자리</span>
+        <span id="selName" class="sel-name"></span>
       </div>
       <button id="guideBtn" class="btn btn-primary big" disabled>자리를 골라 주세요</button>
     </aside>
@@ -34,9 +43,14 @@
     <div id="resultBadge" class="result-badge"></div>
     <h1 id="resultTitle"></h1>
     <p id="resultSub" class="hint"></p>
+    <ol id="steps" class="steps">
+      <li data-step="1"><i></i><span>자리 잡음</span></li>
+      <li data-step="2"><i></i><span>로봇 출발</span></li>
+      <li data-step="3"><i></i><span>로봇을 따라가요</span></li>
+    </ol>
     <div class="result-actions">
       <button id="cancelBtn" class="btn btn-ghost big" hidden>취소</button>
-      <button id="homeBtn" class="btn btn-dark big">처음으로</button>
+      <button id="homeBtn" class="btn btn-dark big">처음으로<span id="resetIn" class="reset-in"></span></button>
     </div>
   </section>
 
