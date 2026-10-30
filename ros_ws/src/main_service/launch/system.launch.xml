@@ -16,6 +16,8 @@
   소스 폴더 기준이라서.
 -->
 <launch>
+  <!-- 이 파일 위치를 먼저 저장 ($(dirname)은 include 뒤에 쓰면 include한 파일 위치로 바뀜) -->
+  <let name="here" value="$(dirname)"/>
   <arg name="pinky1" default="true"/>
   <arg name="pinky2" default="true"/>
   <arg name="pinky3" default="true"/>
@@ -23,7 +25,7 @@
   <arg name="config" default="main_service.yaml"/>   <!-- config/ 안의 파일 이름 (시험: main_service_test.yaml) -->
 
   <!-- 1. 로봇별 domain_bridge (서버 50 <-> pinky1 51 · pinky2 52 · pinky3 53) -->
-  <include file="$(dirname)/../../fleet_msgs/bridge/fleet_bridge.launch.xml">
+  <include file="$(var here)/../../fleet_msgs/bridge/fleet_bridge.launch.xml">
     <arg name="pinky1" value="$(var pinky1)"/>
     <arg name="pinky2" value="$(var pinky2)"/>
     <arg name="pinky3" value="$(var pinky3)"/>
@@ -31,5 +33,5 @@
 
   <!-- 2. 관제 서버. 위치 맞추기 할 로봇 = pinkyN:=true 이고 localize:=true -->
   <node pkg="pinkytorang_main" exec="main_service" name="pinkytorang_main_service" output="screen"
-        args="$(dirname)/../config/$(var config) --localize pinky1=$(var pinky1) pinky2=$(var pinky2) pinky3=$(var pinky3) enable=$(var localize)"/>
+        args="$(var here)/../config/$(var config) --localize pinky1=$(var pinky1) pinky2=$(var pinky2) pinky3=$(var pinky3) enable=$(var localize)"/>
 </launch>
