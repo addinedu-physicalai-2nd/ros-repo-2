@@ -226,6 +226,35 @@ void TrafficManager::onCmdFailed(const std::string& id) {
   robots_[id].cmd_active = false;
 }
 
+bool TrafficManager::redock(const std::string& id) {
+  auto it = robots_.find(id);
+  if (it == robots_.end()) return false;
+  Robot& r = it->second;
+  const MapNode* d = map_.node(r.at);
+  if (!r.localized || !d || d->stop_kind != "DOCK" || !r.committed.empty()) return false;
+  std::string front;  // 도크 앞 통로 노드 (일렬 도킹의 옆 칸 말고)
+  for (const std::string& n : d->next) {
+    const MapNode* m = map_.node(n);
+    if (m && m->stop_kind.empty()) {
+      front = n;
+      break;
+    }
+  }
+  if (front.empty()) return false;
+  r.goal = r.at;
+  r.route_start = r.at;  // 도크에서 나오는 길 = 전진, 다시 들어가는 길 = entry 방향
+  r.plan.clear();
+  r.via = front;         // planPath: 도크 -> 앞 노드 -> 도크
+  r.avoid.clear();
+  r.waiting = false;
+  r.guide = false;
+  r.face_node = "";
+  dropReservedExit(r);
+  logLine("TRAFFIC", id + " 다시 도킹: " + r.at + " (" + front + " 거쳐)");
+  tryExtend(r);
+  return true;
+}
+
 void TrafficManager::abandon(const std::string& id) {
   Robot& r = robots_[id];
   for (auto it = lock_.begin(); it != lock_.end();) {

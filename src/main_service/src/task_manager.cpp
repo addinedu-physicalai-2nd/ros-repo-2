@@ -316,6 +316,11 @@ void TaskManager::onRobotEvent(const std::string& id, uint8_t type, uint32_t cmd
     Task* t = findTask(r->task_id);
     alert("WARN", id, "손님이 따라오지 않아 안내를 멈췄어요 (" + reason + ")");
     if (t && !isEnded(t->stage)) enterStage(*t, Stage::FAILED);
+    // 도크에서 빠진 자리(인사)에서 놓쳤으면 서버는 아직 도크에 있는 줄 안다 -> 집 규칙으론 안 움직이니 직접 다시 넣음
+    if (traffic_.redock(id)) {
+      r->homing = true;
+      record("TASK", id + " 도크 앞에서 안내 실패 -> " + node + " 다시 도킹");
+    }
   } else if (type == EVENT_CMD_FAILED) {
     traffic_.onCmdFailed(id);
     r->fault = true;

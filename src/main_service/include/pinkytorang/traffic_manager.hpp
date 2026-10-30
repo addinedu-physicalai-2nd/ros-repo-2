@@ -57,6 +57,9 @@ class TrafficManager {
   bool setGoal(const std::string& id, const std::string& node, bool guide, const std::string& face_node = "");
   // 로봇이 그 자리에 멈췄다 (안내 손님 놓침): 보낸 남은 칸을 버리고 lock을 푼다. 지금 노드 lock만 남김
   void abandon(const std::string& id);
+  // 도크 노드에 있다고 아는데 실제로는 도크에서 빠져나와 서 있는 로봇 (빠진 자리에서 인사하다 손님 놓침):
+  // 그 도크의 앞 노드를 거쳐 다시 넣는다 (D1: N1 -> D1. 입구 도킹은 N1에서 시작). 도크가 아니면 false
+  bool redock(const std::string& id);
   void clearGoal(const std::string& id);
   bool isStationary(const std::string& id) const;  // 보낸 노드도 없고 목적지도 없음
   std::string goalOf(const std::string& id) const;  // 목적지 ("" = 없음)

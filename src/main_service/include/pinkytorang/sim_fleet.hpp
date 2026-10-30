@@ -72,6 +72,7 @@ class SimFleet : public IFleetOut {
 
   std::mutex mutex_;
   std::map<std::string, Bot> bots_;
+  std::vector<PendingEvent> pending_;  // sendMove에서 바로 생긴 이벤트 (다음 loop에서 보냄)
   std::thread thread_;
   std::atomic<bool> running_{false};
 };

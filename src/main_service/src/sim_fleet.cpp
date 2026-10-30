@@ -54,6 +54,14 @@ void SimFleet::sendMove(const std::string& robot_id, const MoveCmd& cmd) {
   b.guide = cmd.guide;
   for (const WaypointCmd& w : cmd.waypoints) b.path.push_back({w, rev});
   b.running = true;
+  // 안내 시험: SIM_GUEST_LOST가 출발 도크면 (도크에서 빠진 자리에서 인사하다 놓침) 바로 실패
+  const char* lost = std::getenv("SIM_GUEST_LOST");
+  const MapNode* here = map_.node(b.last_node);
+  if (b.guide && !cmd.append && lost && b.last_node == lost && here && here->stop_kind == "DOCK") {
+    b.path.clear();
+    b.running = false;
+    pending_.push_back({b.id, EVENT_CMD_FAILED, b.cmd_id, b.last_node, "guest_lost:" + b.last_node + ":sim"});
+  }
 }
 
 void SimFleet::sendControl(const std::string& robot_id, ControlCmd cmd) {
@@ -153,6 +161,7 @@ void SimFleet::loop() {
     bool send_state = now - last_state >= std::chrono::milliseconds(200);  // 상태 5 Hz
     {
       std::lock_guard<std::mutex> lock(mutex_);
+      events.swap(pending_);
       for (auto& pair : bots_) step(pair.second, dt, events);
       if (send_state) {
         for (auto& pair : bots_) states.push_back(pair.second);
