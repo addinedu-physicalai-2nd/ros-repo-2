@@ -357,8 +357,9 @@ class Entrance(Steps):
             self.log(f'[D1 끝] 기록과: 앞뒤 {(m["tz"] - rec["d1_tz"]) * 1000:+.0f} mm, 옆 {(m["tx"] - rec["d1_tx"]) * 1000:+.0f} mm')
         return 'D1 도킹 끝'
 
-    def undock(self):
-        """D1(서쪽을 봄) -> 곧게 앞으로 교점 (마커 1 = 기록) -> 우90 북쪽, 통로 벽과 평행 (그다음 Nav2 안내)"""
+    def undock(self, spin_deg=0.0):
+        """D1(서쪽을 봄) -> 곧게 앞으로 교점 (마커 1 = 기록) -> 우90 북쪽, 통로 벽과 평행 (그다음 Nav2 안내)
+        spin_deg > 0: 북쪽을 본 뒤 교점(통로 가운데)에서 그만큼 제자리 좌회전 -> AMCL 맞춤 -> 다시 벽과 평행 북쪽"""
         rec = _load('~/align_d1s.json')
         h_w = self.front_square('D1 벽 수직')
         self.back_to(rec['line_tz'], h_w, '교점으로 전진')
@@ -376,8 +377,25 @@ class Entrance(Steps):
             self.mv.move_along(e, h_s)
             self.mv.dk.rotate_to(h_w)
         self.turn(-90.0, '교점 우90 (북쪽)')
-        self.wall_heading('북쪽 (통로 벽)')
-        return '교점에서 북쪽을 봄 (여기서 Nav2 안내)'
+        h_n, _ = self.wall_heading('북쪽 (통로 벽)')
+        if spin_deg > 0:
+            self.spin_here(spin_deg, h_n)
+            self.wall_heading('회전 뒤 북쪽 (통로 벽)')
+        return '교점에서 북쪽을 봄 (여기서 Nav2 안내)' + (f', {spin_deg:.0f}° 회전 (AMCL)' if spin_deg > 0 else '')
+
+    def spin_here(self, deg, h_end):
+        """제자리 좌회전 deg (90°씩 끊어서 odom으로), 끝은 h_end. AMCL이 벽을 여러 방향으로 보고 위치를 다시 맞춤"""
+        import time
+        t0 = time.time()
+        p0 = self.mv.dk.pose()
+        n = max(1, int(round(deg / 90.0)))
+        for k in range(1, n + 1):
+            target = md.wrap(p0[2] + math.radians(deg * k / n)) if k < n else h_end
+            self.mv.dk.rotate_to(target)
+        p = self.mv.dk.pose()
+        self.log(f'[교점 회전] {deg:.0f}° ({time.time() - t0:.1f}초), odom 자리 이동 '
+                 f'{math.hypot(p[0] - p0[0], p[1] - p0[1]) * 1000:.0f} mm, 끝 방향 오차 '
+                 f'{math.degrees(md.wrap(h_end - p[2])):+.1f}°')
 
 
 def check():

@@ -20,7 +20,7 @@ fleet_agent <-> docking 인터페이스 (std_msgs/String, JSON)
   (leave = 노드를 떠날 때, precision_stops의 <노드>.leave)
   undock    : docking/undock.py   마커로 나올 자리까지 + 회전 (+ align 있으면 방위각 정렬)    (D2/D3 -> N16/N15)
   entrance  : docking/entrance.py Entrance.dock   N1 -> 가운데로 -> 마커 6 · 1 교점 -> 우90 -> 곧게 후진 (D1)
-  entrance_exit : docking/entrance.py Entrance.undock  D1 -> 교점 -> 우90 북쪽 (그다음 Nav2)
+  entrance_exit : docking/entrance.py Entrance.undock  D1 -> 교점 -> 우90 북쪽 [-> spin_deg 제자리 회전, AMCL] (그다음 Nav2)
   table     : docking/table_dock.py TableDocker.run   다리 마커로 차선 정렬 -> 바닥 정지선            (T1~T6)
   table_exit: docking/table_dock.py TableDocker.leave 서빙 뒤 dist만큼 전진 (그다음 Nav2)
   tape_exit : docking/line_dock.py LineDocker.leave  앞으로 빼서 새 선에서 정지              (P1 -> 그다음 Nav2)
@@ -234,7 +234,7 @@ class DockingNode(Node):
         """입구 통로 D1 (docking/entrance.py): out=False N1 -> D1, out=True D1 -> 교점 북쪽"""
         st = self.steps(1 if out else 6, f'{req.get("node")}_{"exit" if out else "entrance"}', cls=Entrance)
         md.log(f'[{req.get("node")}] {"빠지기 (교점 -> 북쪽)" if out else "도킹 (N1 -> 교점 -> 후진)"}')
-        md.log(f'결과: {st.undock() if out else st.dock()}')
+        md.log(f'결과: {st.undock(float(req.get("spin_deg", 0.0))) if out else st.dock()}')
         return '성공'
 
     def corridor_names(self):

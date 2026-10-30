@@ -226,6 +226,9 @@ ros2 run fleet_agent node_tour                     # 기본: 홀 N1 -> N13 지�
 ros2 run fleet_agent node_tour N1 N4 N13 N11 N1    # 목표 노드만 적으면 사이 노드는 길 찾기로 채움
 ros2 run fleet_agent node_tour --step 2 N1 N4 N1   # 목표마다 멈춰 2초 쉬고
 ros2 run fleet_agent node_tour --loops 3
+ros2 run fleet_agent node_tour --preset hall       # D1 빠지기(교점에서 360° 회전 = AMCL) -> 홀 N1~N13 + 테이블 모서리 보기 (N3·N6·N9 양쪽)
+#   로봇: robot_system start_node:=D1 use_docking:=true precision_stops:=$(ros2 pkg prefix fleet_msgs)/share/fleet_msgs/docs/precision_stops.yaml
+#   로그: ~/tour_logs/tour_<시각>.log (Move · 이벤트 · 노드마다 앞뒤/옆 오차 · AMCL) / _trace.csv (0.2초 위치) / _result.csv
 ros2 run fleet_agent node_tour --tables            # 테이블 앞 노드(N2~N10)마다 서서 가장 가까운 테이블 모서리(face)를 봄
 ros2 run fleet_agent node_tour --tables all        # 그 노드가 맡은 테이블 모두 (N3 = T2, T1)
 ```
