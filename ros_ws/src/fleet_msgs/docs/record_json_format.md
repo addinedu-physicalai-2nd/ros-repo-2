@@ -3,9 +3,9 @@
 Pinky Pro (ROS 2 Jazzy), AprilTag 36h11 정밀 정렬·도킹에서 쓰는 기록 파일의 형식과 좌표 규칙을 정리한 문서입니다.
 기록 파일은 "그 자리에서 마커가 이렇게 보였다 = 정답 자세"를 저장하고, 주행할 때 이 값과 비교해서 자세를 맞춥니다.
 
-- 위치: 레포 `src/fleet_agent/records/` (모든 로봇 공통, 카메라 보정만 `records/cam/<hostname>.json`). 읽기 · 쓰기는 `docking/records.py`.
+- 위치: 레포 `ros_ws/src/fleet_agent/records/` (모든 로봇 공통, 카메라 보정만 `records/cam/<hostname>.json`). 읽기 · 쓰기는 `docking/records.py`.
   예전처럼 `~/`에만 있는 파일도 읽음 (레포에 없을 때). 아래 문서의 `~/파일` 표기는 파일 이름으로 보면 됨
-- 만드는 프로그램: `ros2 run fleet_agent dock_record` (레포 `src/fleet_agent/fleet_agent/docking/dock_record.py`)
+- 만드는 프로그램: `ros2 run fleet_agent dock_record` (레포 `ros_ws/src/fleet_agent/fleet_agent/docking/dock_record.py`)
 - 쓰는 곳: `docking/corridor.py` (N14 정렬, 통로 후진, 도크 들어가기), `docking/undock.py` (빠지기)
 - 단위: 거리 m, 각도 rad, 초점거리 px
 

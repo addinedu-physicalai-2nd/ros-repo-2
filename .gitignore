@@ -12,7 +12,7 @@ log/
 __pycache__/
 *.pyc
 
-# CMake로 직접 빌드할 때 생기는 폴더 (예: src/main_service/build)
+# CMake로 직접 빌드할 때 생기는 폴더 (예: ros_ws/src/main_service/build)
 **/build/
 
 # 편집기

@@ -1,11 +1,11 @@
-"""기록(json) 위치: 레포 src/fleet_agent/records/ 하나에서 모든 로봇이 같이 읽는다 (로봇 역할이 고정이 아니라서)
+"""기록(json) 위치: 레포 ros_ws/src/fleet_agent/records/ 하나에서 모든 로봇이 같이 읽는다 (로봇 역할이 고정이 아니라서)
 
 읽기  find(이름)  : 1) 레포 소스 records/ (git pull만 하면 바로 반영)  2) 설치된 share/fleet_agent/records/
                     3) ~/ (예전 방식, 레포에 아직 없는 기록)
 카메라 cam_file() : records/cam/<hostname>.json (로봇마다 다름) -> 없으면 ~/dock_cam.json
 쓰기  save_path(이름): 기록 도구(dock_record · marker_dock --record · --calibrate)는 레포 소스 records/에 바로 씀
                     -> git diff로 보이고, 커밋 · push하면 다른 로봇도 같은 값 (소스 폴더를 못 찾으면 ~/)
-레포 위치를 못 찾을 때는 환경 변수 FLEET_RECORDS_DIR=<.../src/fleet_agent/records>
+레포 위치를 못 찾을 때는 환경 변수 FLEET_RECORDS_DIR=<.../ros_ws/src/fleet_agent/records>
 """
 import os
 import socket
@@ -22,12 +22,12 @@ def _source_dir():
         from ament_index_python.packages import get_package_share_directory
         share = get_package_share_directory('fleet_agent')            # <ws>/install/fleet_agent/share/fleet_agent
         ws = os.path.abspath(os.path.join(share, '..', '..', '..', '..'))
-        cands.append(os.path.join(ws, 'src', 'fleet_agent', 'records'))
+        cands.append(os.path.join(ws, 'src', 'fleet_agent', 'records'))   # ws = 레포/ros_ws
     except Exception:
         pass
     here = os.path.dirname(os.path.abspath(__file__))                  # 소스에서 바로 돌릴 때 (테스트 · 혼자 실행)
     cands.append(os.path.abspath(os.path.join(here, '..', '..', 'records')))
-    cands.append(os.path.join(_HOME, 'ros-repo-2', 'src', 'fleet_agent', 'records'))
+    cands.append(os.path.join(_HOME, 'ros-repo-2', 'ros_ws', 'src', 'fleet_agent', 'records'))
     for c in cands:
         if os.path.isdir(c):
             return c

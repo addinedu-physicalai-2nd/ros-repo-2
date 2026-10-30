@@ -79,7 +79,7 @@ WebSocket: `/ws/store` (snapshot에 `tables`, 로봇 `charging` 포함), `/ws/cu
 새로 생긴 항목: `tables`(id · 배치도 좌표 x, y · 크기 w, h), `entrance_docks` · `pickup_docks` · `dock_via`, `busy_tables` · `entrance_standby_quiet` · `entrance_standby_busy`, `max_active_guide`, `serve_batch_max`, `reassign_after_sec`, `entrance_keep_penalty_m`, `guide_timeout_sec`, `max_active_serve`, `min_battery_pct`, `ready_battery_pct`, `require_dock_start`, `display.to_table_guide / at_table_guide`
 
 맵은 **fleet_msgs v7.1** (`config/node_graph.yaml` = fleet_msgs `docs/node_graph.yaml` 복사본, 그림 `config/node_map_v7.png`)
-- ros-repo-2에 올릴 때는 설정의 `node_graph`를 `../../fleet_msgs/docs/node_graph.yaml`로 바꿔 복사 없이 읽고, `web_root`는 `../../../web`
+- 설정의 `node_graph`(`../../fleet_msgs/docs/node_graph.yaml`) · `web_root`(`../../../../web`)는 설정 파일 위치 기준 상대 경로 (레포 `ros_ws/src/main_service/config/` -> `ros_ws/src/fleet_msgs/docs/`, `web/`)
 - 좌표는 SLAM 맵 `fleet_msgs/docs/maps/project_map_v2` 기준 map 프레임. 맵이 바뀌면 fleet_msgs 쪽만 고치면 된다
 - 홀 격자 N1~N13 (위 → 아래 줄, 왼 → 오), 테이블 T1~T6, 전부 양방향 1차선
 - 입구 통로: N1 → D1 (v7.1부터 입구 도킹은 D1 하나, `dock_via: {}`). 예전 맵은 D1(앞칸) → D2(안쪽) 한 줄이라 `dock_via: {D2: D1}`
@@ -141,8 +141,8 @@ ros2 run pinkytorang_main main_service src/main_service/config/main_service_test
 ```bash
 sudo apt install -y libasio-dev libyaml-cpp-dev libsqlite3-dev
 
-# 워크스페이스: {src/fleet_msgs, src/main_service, web} (ros-repo-2 구조)
-cd ~/ros-repo-2
+# 레포 구조: ros_ws/src/{fleet_msgs, main_service, fleet_agent} + web/. 빌드 · 실행은 ros_ws에서
+cd ~/ros-repo-2/ros_ws
 colcon build --packages-select fleet_msgs pinkytorang_main   # fleet_msgs 0.11.0 (메시지 v11)
 source install/setup.bash
 
@@ -157,6 +157,7 @@ ros2 run pinkytorang_main main_service src/main_service/config/main_service.yaml
 ### 서버 PC 한 번에 켜기 + 시작 전 위치 맞추기 (launch/system.launch.xml)
 
 ```bash
+cd ~/ros-repo-2/ros_ws && source install/setup.bash
 export ROS_DOMAIN_ID=50
 ros2 launch src/main_service/launch/system.launch.xml                                  # 브릿지 3대 + 서버 + 위치 맞추기
 ros2 launch src/main_service/launch/system.launch.xml pinky3:=false                    # 준비된 로봇만

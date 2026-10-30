@@ -1,10 +1,11 @@
-# 핑키토랑 Main Service 설정
+# 핑키토랑 Main Service 시험 설정 (도킹 없이 아무 노드에서 켜서 시험)
+# main_service.yaml과 같고 [시험] 표시한 값만 다르다
 # 상대 경로는 이 파일이 있는 폴더 기준
 
 http_port: 8080
-web_root: ../../../web             # pinkytorang/web (고객 · 매장 · 입구 키오스크 UI). ros-repo-2에 올리면 ../../../web
-db_path: ../pinkytorang.db      # 없으면 새로 만든다
-node_graph: ../../fleet_msgs/docs/node_graph.yaml     # fleet_msgs v7.1 docs/node_graph.yaml 복사본 (그림 node_map_v7.png). ros-repo-2에 올리면 ../../fleet_msgs/docs/node_graph.yaml 로 바꾸고 복사본은 지움
+web_root: ../../../../web          # 레포/web (고객 · 매장 · 입구 키오스크 UI). 이 파일 기준 상대 경로 (ros_ws/src/main_service/config -> 레포/web)
+db_path: ../pinkytorang_test.db  # [시험] 운영 DB와 따로
+node_graph: ../../fleet_msgs/docs/node_graph.yaml     # ros_ws/src/fleet_msgs/docs/node_graph.yaml (이 파일 기준)
 
 # 키오스크 배치도에 그릴 범위 (map 좌표, m) = 실측 노드(pinkytorang_waypoints.yaml) 기준으로 옛 범위를 옮긴 값 [추정]
 board_x: -0.235
@@ -34,8 +35,8 @@ entrance_docks: [D1]            # 입구 쪽. 안내는 여기 서 있는 로봇
 pickup_docks: [D2, D3]          # 픽업 쪽 (주방 아래 구역: D2 = N16 옆, D3 = N15 옆)
 dock_via: {}                    # 뒤칸: 앞칸 (뒤칸은 앞칸이 비어야 드나듦). 최종 맵은 이런 도킹이 없음
 busy_tables: 4                  # 찬 테이블(사용 중 + 안내 중)이 이 수 이상이면 바쁨
-entrance_standby_quiet: 1       # 한가할 때 입구에 세워 둘 로봇 수 (안내 1대)
-entrance_standby_busy: 1        # 바쁠 때도 1대 (만석 = 모든 테이블 착석 + 안내 대기 없음 이면 0 = 3대 다 서빙)
+entrance_standby_quiet: 0       # [시험] 입구 대기 배치 안 함
+entrance_standby_busy: 0        # [시험]
 entrance_keep_penalty_m: 1.5    # 서빙 배정 때 입구 로봇에 더하는 비용 (만석이 아니면, 다른 로봇이 비슷한 거리면 그쪽에 서빙)
 
 # ---- 테이블 (id = node_graph의 table 값). 손님이 입구 키오스크 배치도에서 빈 테이블을 직접 고른다
@@ -55,7 +56,7 @@ ready_battery_pct: 80           # 충전 중인 로봇은 이 이상이 돼야 �
 
 # ---- 시작 규칙
 require_dock_start: false       # true = 로봇은 도킹 위에서 켠다. 처음 위치가 도킹이 아니면 배정 안 함 (알림)
-stay_at_start: false            # 시험용: true = 도킹 대신 켤 때 노드가 집 (쉬면 거기서 대기, 작업 끝나면 거기로). main_service_test.yaml 참고
+stay_at_start: true             # [시험] 켤 때 노드가 집: 쉬면 거기서 대기, 작업 끝나면 거기로 돌아감 (도킹으로 안 감)
 
 # ---- 교통
 comm_timeout_sec: 3.0           # fleet/state가 이만큼 안 오면 통신 끊김

@@ -1,5 +1,6 @@
 <!--
   서버 PC 전체 시작: 로봇별 domain_bridge + 관제 서버 (+ 시작 전 위치 맞추기)
+    cd ~/ros-repo-2/ros_ws && source install/setup.bash     (경로는 ros_ws 기준)
     export ROS_DOMAIN_ID=50
     ros2 launch src/main_service/launch/system.launch.xml                              # 3대 모두, 운영 설정
     ros2 launch src/main_service/launch/system.launch.xml pinky3:=false                # 준비된 로봇만 (pinky3 안 씀)

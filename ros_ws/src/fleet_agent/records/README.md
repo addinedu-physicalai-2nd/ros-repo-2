@@ -3,10 +3,10 @@
 로봇은 역할이 고정이 아니다 (안내 · 서빙 · 픽업을 바꿔 가며 함). 그래서 기록은 로봇 홈이 아니라 **이 폴더 하나**에 두고,
 모든 로봇의 docking 코드가 여기서 바로 읽는다 (`docking/records.py`). 로봇에 따로 깔 것 없음: `git pull` · `fbuild`면 끝.
 
-- 읽는 순서: 레포 소스 `src/fleet_agent/records/` → 설치된 `share/fleet_agent/records/` → `~/` (예전에 홈에 찍은 것)
+- 읽는 순서: 레포 소스 `ros_ws/src/fleet_agent/records/` → 설치된 `share/fleet_agent/records/` → `~/` (예전에 홈에 찍은 것)
 - 기록 도구(`dock_record` · `marker_dock --record` · `--calibrate` · `marker_align --record`)는 **이 폴더에 바로 저장**
   → 로봇에서 `git status`로 보이고, 커밋 · push하면 다른 로봇도 같은 값
-- 레포 위치를 못 찾으면 `export FLEET_RECORDS_DIR=~/ros-repo-2/src/fleet_agent/records`
+- 레포 위치를 못 찾으면 `export FLEET_RECORDS_DIR=~/ros-repo-2/ros_ws/src/fleet_agent/records`
 
 | 파일 | 기능 | 쓰는 코드 | 찍은 로봇 · 명령 |
 |---|---|---|---|

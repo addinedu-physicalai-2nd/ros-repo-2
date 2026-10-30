@@ -2,9 +2,10 @@
   서버 노트북에서 로봇별 domain_bridge를 함께 띄운다. (Python launch 대신 XML)
 
   실행:
-    source ~/ros2_ws/install/setup.bash          # fleet_msgs 포함
-    ros2 launch ~/ros-repo-2/fleet_msgs/bridge/fleet_bridge.launch.xml                     # 3대 모두
-    ros2 launch ~/ros-repo-2/fleet_msgs/bridge/fleet_bridge.launch.xml pinky3:=false       # 일부 끄기
+    source ~/ros-repo-2/ros_ws/install/setup.bash          # fleet_msgs 포함
+    ros2 launch ~/ros-repo-2/ros_ws/src/fleet_msgs/bridge/fleet_bridge.launch.xml                     # 3대 모두
+    ros2 launch ~/ros-repo-2/ros_ws/src/fleet_msgs/bridge/fleet_bridge.launch.xml pinky3:=false       # 일부 끄기
+    (서버까지 한 번에: ros_ws/src/main_service/launch/system.launch.xml)
 
   로봇을 늘리면 <robot_id>_bridge.yaml을 만들고 아래에 arg 하나, node 하나를 추가한다.
 -->

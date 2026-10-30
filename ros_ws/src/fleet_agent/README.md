@@ -125,7 +125,7 @@ ros2 run fleet_agent dock_record dock --dock d2  # D2 칸에 손으로: d2 · n1
 ros2 run fleet_agent dock_record check           # 확인 (n15와 d3 차이 0이어야 함, --dock d2도)
 ros2 run fleet_agent dock_record scan            # (필요하면) 지금 자리에서 라이다로 양옆 벽이 보이나
 ```
-기록 파일은 레포 `src/fleet_agent/records/`에 저장되고 모든 로봇이 거기서 읽는다 (`records/README.md`, 형식: `fleet_msgs/docs/record_json_format.md`).
+기록 파일은 레포 `ros_ws/src/fleet_agent/records/`에 저장되고 모든 로봇이 거기서 읽는다 (`records/README.md`, 형식: `fleet_msgs/docs/record_json_format.md`).
 다시 찍으면 `git status`에 바뀐 json이 보이니 커밋 · push. 마커를 다시 붙이거나 벽을 옮기면 다시 기록한다.
 
 켜기
@@ -254,12 +254,12 @@ ros2 run fleet_agent node_tour --tables all        # 그 노드가 맡은 테이
 
 ```bash
 # ---- 로봇 (pinky1, ROS_DOMAIN_ID=1) : 도킹 자리(예: D1)에 올려 두고
-cd ~/ros-repo-2 && colcon build --packages-up-to fleet_agent && source install/setup.bash
+cd ~/ros-repo-2/ros_ws && colcon build --packages-up-to fleet_agent && source install/setup.bash
 # 1) bringup (모터 · LiDAR · odom)    2) Nav2 + 맵 project_map_v2, RViz로 초기 위치를 D1에 맞춤
 ros2 launch fleet_agent fleet_agent.launch.xml robot_id:=pinky1 start_node:=D1
 
 # ---- 서버 노트북 (ROS_DOMAIN_ID=0)
-cd ~/ros-repo-2 && colcon build --packages-up-to pinkytorang_main && source install/setup.bash
+cd ~/ros-repo-2/ros_ws && colcon build --packages-up-to pinkytorang_main && source install/setup.bash
 ros2 launch src/fleet_msgs/bridge/fleet_bridge.launch.xml pinky2:=false pinky3:=false
 ros2 run pinkytorang_main main_service src/main_service/config/main_service.yaml
 # 브라우저: http://<노트북 IP>:8080/c?table=T1 에서 주문 (매장 화면 /store)
@@ -280,7 +280,7 @@ event CMD_DONE T1                              ← 테이블 도착 (수령 버�
 ## 빌드 · 실행
 
 ```bash
-cd ~/ros-repo-2 && colcon build --packages-select fleet_msgs fleet_agent && source install/setup.bash
+cd ~/ros-repo-2/ros_ws && colcon build --packages-select fleet_msgs fleet_agent && source install/setup.bash
 
 # 로봇마다 (ROS_DOMAIN_ID = 1 / 2 / 3). Nav2 · 맵(project_map_v2) · 카메라 · LiDAR는 먼저 띄워 둔다
 ros2 launch fleet_agent fleet_agent.launch.xml robot_id:=pinky1 start_node:=D1

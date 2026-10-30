@@ -529,8 +529,7 @@ pinky1 → 서버: NODE_REACHED(D2) → N13 해제 (N8은 이미 해제됨)
 ## 8. 빌드와 사용
 
 ```bash
-cd ~/ros2_ws/src && cp -r fleet_msgs .
-cd ~/ros2_ws && colcon build --packages-select fleet_msgs
+cd ~/ros-repo-2/ros_ws && colcon build --packages-select fleet_msgs
 source install/setup.bash
 ros2 interface show fleet_msgs/msg/Display
 ```
@@ -550,9 +549,9 @@ export ROS_DOMAIN_ID=3   # pinky3
 sudo apt install ros-jazzy-domain-bridge
 
 # 서버 노트북: 브리지 실행 (fleet_msgs가 source 된 터미널에서)
-source ~/ros2_ws/install/setup.bash
-ros2 launch ~/ros-repo-2/fleet_msgs/bridge/fleet_bridge.launch.xml                       # 3대 모두
-# ros2 launch ~/ros-repo-2/fleet_msgs/bridge/fleet_bridge.launch.xml pinky2:=false pinky3:=false   # pinky1만
+source ~/ros-repo-2/ros_ws/install/setup.bash
+ros2 launch ~/ros-repo-2/ros_ws/src/fleet_msgs/bridge/fleet_bridge.launch.xml                       # 3대 모두
+# ros2 launch ~/ros-repo-2/ros_ws/src/fleet_msgs/bridge/fleet_bridge.launch.xml pinky2:=false pinky3:=false   # pinky1만
 ```
 
 연결 확인:
