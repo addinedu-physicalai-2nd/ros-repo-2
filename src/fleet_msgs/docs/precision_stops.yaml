@@ -8,7 +8,8 @@
 #             -> 마커 5(axis)와 벽면 수직.  hold_axis: true -> 이 방향이 이어지는 후진의 축 (출발 회전 생략)
 #   entrance: 입구 D1. from 노드(N1)에서 도착지 D1 쪽을 보고 docking에 통째로 (통로 가운데로 -> 마커 6 · 1 교점 -> 우90
 #             -> 곧게 후진). 끝나면 돌지 않고 CMD_DONE. leave entrance_exit: 교점까지 나와 북쪽
-#             (spin_deg: 그 자리에서 제자리 회전 -> AMCL 맞춤 -> 다시 북쪽) -> Nav2
+#             (spin_deg: 그 자리에서 제자리 회전 -> AMCL 맞춤 -> 다시 북쪽. 기본 0 = 안 돎) -> Nav2
+#             AMCL 맞춤 360°는 빠질 때마다 하지 않고 시스템 시작 전에 한 번 (서버 위치 맞추기 = Control LOCALIZE)
 #   tape    : 바닥 테이프(E자)로 바구니를 픽업대에 넣음. 끝나면 CMD_DONE (도착지일 때)
 #             ir_black: 바닥 센서 검정 문턱 (통로 바닥이 ~3500으로 한 번씩 튀어서 3800)
 #   dock_in : 통로 쪽 도크 (후진으로 칸에 넣음): 도크 줄 노드(N15 / N16) 가로선에서 서고 -> 우90
@@ -46,7 +47,7 @@
 N14: {method: align, front: n14e, axis: n14s, turn_deg: -90, hold_axis: true}   # 마커 4 -> 우90 -> 마커 5
 
 D1:  {method: entrance, from: N1, timeout: 120,         # 입구 통로 (안내 로봇 자리). N1에서 D1 쪽을 보고 통째로: docking/entrance.py
-      leave: {method: entrance_exit, spin_deg: 360, timeout: 90}}   # 빠지기: 교점(통로 가운데)까지 나와 북쪽 -> 360° 회전(AMCL) -> Nav2로 N1. 기록: dock_record d1
+      leave: {method: entrance_exit, timeout: 60}}       # 빠지기: 교점(통로 가운데)까지 나와 북쪽 -> Nav2로 N1. 기록: dock_record d1
 D2:  {method: dock_in, marker: 2, stop: n16, target: d2, timeout: 70,    # N16 옆. 기록: dock_record dock --dock d2
       leave: {method: undock, marker: 2, target: n16, to: N16, turn_deg: 90, hold_axis: true}}
 D3:  {method: dock_in, marker: 3, stop: n15, target: d3, timeout: 70,    # N15 옆. 기록: dock_record all

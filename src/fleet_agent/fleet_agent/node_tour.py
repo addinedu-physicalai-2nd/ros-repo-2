@@ -13,7 +13,7 @@ fleet_agent에 /fleet/move를 직접 보내고 /fleet/event를 받아서, 노드
   ros2 run fleet_agent node_tour --start D1 --spin 360 N1 N2 ...   # 도크에서 시작: leave(빠지기) -> 첫 노드 -> 한 바퀴
 
   --preset hall = --start D1 --tables all N1 N2 N3 N4 N7 N6 N5 N8 N11 N12 N9 N10 N13
-     (회전은 fleet_agent 빠지기 안에서: precision_stops D1 leave spin_deg 360 = 실제 시스템 동작)
+     + --spin 360: 첫 노드(N1)에서 한 바퀴 (AMCL 맞춤. 시스템은 시작 전 위치 맞추기 LOCALIZE로 한 번 함)
      로봇 쪽: robot_system start_node:=D1 use_docking:=true precision_stops:=.../precision_stops.yaml (spin_deg 0)
   --start <도크>: 첫 Move에 도크를 넣지 않는다 (fleet_agent가 start_node의 leave = 빠지기를 먼저 하고 첫 노드로 Nav2)
   --spin <deg>: (따로 시험할 때) 첫 노드에 서면 제자리 회전 (cmd_vel, odom) -> AMCL 맞춤. 앞뒤 AMCL 불확실성을 기록
@@ -51,12 +51,13 @@ from tf2_ros import Buffer, TransformListener
 DEFAULT_ROUTE = ['N1', 'N2', 'N3', 'N4', 'N7', 'N6', 'N5', 'N8', 'N9', 'N10',
                  'N13', 'N12', 'N11', 'N8', 'N5', 'N2', 'N1']
 PRESETS = {
-    # D1 빠지기(교점에서 360° 회전은 precision_stops D1 leave spin_deg, 시스템과 같음) -> 홀 13개 노드를 한 번씩
+    # D1 빠지기 -> N1에서 360° (AMCL) -> 홀 13개 노드를 한 번씩
     # (윗줄 -> 2줄 -> N8 -> 아랫줄 -> 3줄 -> N13), 테이블 앞 노드에서 모서리 보기 (N3 · N6 · N9는 양쪽 테이블 둘 다)
-    'hall': dict(start='D1', spin=0.0, tables='all',
+    'hall': dict(start='D1', spin=360.0, tables='all',
                  route=['N1', 'N2', 'N3', 'N4', 'N7', 'N6', 'N5', 'N8', 'N11', 'N12', 'N9', 'N10', 'N13']),
 }
-EV_NAME = {0: 'NODE_REACHED', 1: 'CMD_DONE', 2: 'CMD_FAILED', 3: 'STATE', 4: 'BLOCKED', 5: 'DOCKED', 6: 'UNDOCKED'}
+EV_NAME = {0: 'NODE_REACHED', 1: 'CMD_DONE', 2: 'CMD_FAILED', 3: 'STATE', 4: 'BLOCKED', 5: 'DOCKED', 6: 'UNDOCKED',
+           7: 'LOCALIZED'}
 SPIN_W = 0.5            # rad/s 제자리 회전 속도
 SPIN_TIMEOUT = 40.0     # s
 
