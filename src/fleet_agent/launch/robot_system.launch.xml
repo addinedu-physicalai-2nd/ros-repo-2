@@ -6,14 +6,17 @@
 
   아래 두 명령을 차례로 켜는 것과 같다
     ros2 launch pinky_bringup bringup_robot.launch.xml
-    ros2 launch pinky_navigation bringup_launch.xml map:=$HOME/maps/pinkytorang_map_v4.yaml params_file:=$HOME/params/config4.yaml
-  맵 · Nav2 설정을 바꿀 때: map:=... params_file:=...
+    ros2 launch pinky_navigation bringup_launch.xml map:=<레포 맵> params_file:=<레포 config4>
+  맵 · Nav2 설정은 레포에서 읽는다 (로봇 홈 ~/maps · ~/params 안 씀)
+    맵      src/fleet_msgs/docs/maps/pinkytorang_map_v5.yaml  (서버 · 로봇 공용, 해상도 2.5 cm)
+    Nav2    src/fleet_agent/params/config4.yaml
+  다른 맵 · 설정으로 켤 때: map:=... params_file:=...  (예: 예전 맵 map:=$HOME/maps/pinkytorang_map_v4.yaml)
 -->
 <launch>
   <arg name="robot_id" default="pinky1"/>
   <arg name="start_node" default="D1"/>   <!-- 로봇을 올려 둔 도킹. 초기 위치 · 서버 위치 확인에 씀 -->
-  <arg name="map" default="$(env HOME)/maps/pinkytorang_map_v4.yaml"/>
-  <arg name="params_file" default="$(env HOME)/params/config4.yaml"/>   <!-- Nav2 설정 -->
+  <arg name="map" default="$(find-pkg-share fleet_msgs)/docs/maps/pinkytorang_map_v5.yaml"/>
+  <arg name="params_file" default="$(find-pkg-share fleet_agent)/params/config4.yaml"/>   <!-- Nav2 설정 -->
 
   <arg name="bringup_pkg" default="pinky_bringup"/>
   <arg name="bringup_file" default="bringup_robot.launch.xml"/>

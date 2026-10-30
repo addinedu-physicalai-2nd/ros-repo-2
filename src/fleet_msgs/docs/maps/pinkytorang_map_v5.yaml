@@ -1,0 +1,7 @@
+image: pinkytorang_map_v5.pgm
+mode: trinary
+resolution: 0.025
+origin: [-0.221, -1.192, 0]
+negate: 0
+occupied_thresh: 0.65
+free_thresh: 0.196

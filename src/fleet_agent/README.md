@@ -163,17 +163,36 @@ CMD_DONE 바로 앞에, undock / entrance_exit(빠지기)가 끝나면 `UNDOCKED
 
 ## 한 번에 켜기 (robot_system.launch.xml)
 
-bringup -> (2초) Nav2(맵 pinkytorang_map_v4, 설정 config4) -> 초기 위치 + fleet_agent 를 한 명령으로 켠다.
+bringup -> (2초) Nav2(맵 pinkytorang_map_v5, 설정 config4: 둘 다 레포) -> 초기 위치 + fleet_agent 를 한 명령으로 켠다.
 ```bash
 export ROS_DOMAIN_ID=52
 ros2 launch fleet_agent robot_system.launch.xml robot_id:=pinky2 start_node:=D2
 ```
 - 초기 위치: `initial_pose`가 node_graph.yaml의 start_node 좌표 · yaw로 /initialpose를 보낸다 (RViz 2D Pose Estimate 대신).
   D 좌표가 안 맞으면 `set_initial_pose:=false`로 끄고 RViz로 맞춘다
-- 맵 · Nav2 설정 바꾸기: `map:=... params_file:=...` (기본 ~/maps/pinkytorang_map_v4.yaml, ~/params/config4.yaml)
+- 맵 · Nav2 설정 바꾸기: `map:=... params_file:=...`
+  (기본 `fleet_msgs/docs/maps/pinkytorang_map_v5.yaml`, `fleet_agent/params/config4.yaml`. 바꾸면 커밋 · push 후 로봇에서 pull + fbuild)
 - Nav2에서 tf 에러가 계속 나면 `nav_delay:=5`
 - 도킹 없이 N 노드에서 시험: `start_yaw:=<rad>`(로봇 앞 방향), `spin_deg:=360`(초기 위치 뒤 제자리 한 바퀴로 AMCL 맞춤)
   서버는 `main_service_test.yaml`로 켠다 (켤 때 노드에서 대기, 작업 끝나면 거기로 돌아감)
+
+## 맵 · Nav2 설정 (레포)
+
+| 파일 | 내용 |
+|---|---|
+| `fleet_msgs/docs/maps/pinkytorang_map_v5.pgm/.yaml` | SLAM 맵 2.5 cm (100 × 81칸, 약 2.5 × 2.0 m). 서버 · 로봇 공용. 노드 좌표(`node_graph.yaml`)는 이 맵 기준 |
+| `fleet_agent/params/config4.yaml` | Nav2 설정: costmap 2.5 cm, footprint 뒤 -0.14 m(바구니), 라이다 0.15 m 안 무시, 직진 0.11 m/s, inflation 0.12 m |
+| `fleet_agent/params/mapper_small.yaml` | 매핑(slam_toolbox) 설정: 2.5 cm, 레이저 4 m, 0.2 m · 0.2 rad마다 스캔 |
+
+다시 매핑 (pinky2, 시작 자리를 정해 두고 같은 자리에서. 바구니는 떼고)
+```bash
+ros2 launch pinky_bringup bringup_robot.launch.xml                      # 터미널 A
+ros2 launch pinky_navigation map_building.launch.xml \
+  slam_params_file:=$(ros2 pkg prefix fleet_agent)/share/fleet_agent/params/mapper_small.yaml   # 터미널 B
+ros2 run teleop_twist_keyboard teleop_twist_keyboard                   # PC, 천천히 한 바퀴 + 통로
+ros2 run nav2_map_server map_saver_cli -f ~/maps/pinkytorang_map_v6    # 저장 -> 레포 fleet_msgs/docs/maps/에 넣고 커밋
+```
+맵을 다시 만들면 원점 · 방향이 바뀌므로 `node_graph.yaml` 노드 좌표와 서버 키오스크 배치도 좌표도 다시 읽는다.
 
 ## 안내 (guide_node) - 손님 확인
 
