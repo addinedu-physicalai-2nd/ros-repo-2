@@ -143,7 +143,7 @@ sudo apt install -y libasio-dev libyaml-cpp-dev libsqlite3-dev
 
 # 워크스페이스: {src/fleet_msgs, src/main_service, web} (ros-repo-2 구조)
 cd ~/ros-repo-2
-colcon build --packages-select fleet_msgs pinkytorang_main   # fleet_msgs 0.7.1 (메시지는 v5부터 같음)
+colcon build --packages-select fleet_msgs pinkytorang_main   # fleet_msgs 0.11.0 (메시지 v11)
 source install/setup.bash
 
 # 가상 로봇 (ROS 없이 관제 · UI 확인, 2배속)
@@ -153,6 +153,23 @@ ros2 run pinkytorang_main main_service src/main_service/config/main_service.yaml
 ```
 
 가상 로봇은 배터리를 흉내 낸다 (움직이면 줄고 도킹에서 참). pinky3은 12%로 시작해서 충전부터 한다.
+
+### 서버 PC 한 번에 켜기 + 시작 전 위치 맞추기 (launch/system.launch.xml)
+
+```bash
+export ROS_DOMAIN_ID=50
+ros2 launch src/main_service/launch/system.launch.xml                                  # 브릿지 3대 + 서버 + 위치 맞추기
+ros2 launch src/main_service/launch/system.launch.xml pinky3:=false                    # 준비된 로봇만
+ros2 launch src/main_service/launch/system.launch.xml config:=main_service_test.yaml   # 시험 설정
+ros2 launch src/main_service/launch/system.launch.xml localize:=false                  # 위치 맞추기 건너뜀
+```
+
+- `pinkyN:=true`인 로봇만 브릿지를 켜고, 서버가 켜진 뒤 그 로봇들에게 **이름 순서대로 한 대씩** `Control LOCALIZE`를 보낸다
+  (`main_service --localize pinky1=true pinky2=true pinky3=false enable=true`. 설정 `localize_robots`를 덮어씀)
+- 로봇: 앞으로 조금(기본 0.15 m) → 제자리 360° (AMCL이 주변을 다 봄) → 처음 방향 → 같은 만큼 뒤로 → `RobotEvent LOCALIZED`
+- `LOCALIZED`가 오면 다음 로봇. 다 끝날 때까지 **모든 로봇이 작업 · 이동을 안 한다** (도크 앞에서 도는 로봇 옆을 지나가지 않게). 주문 · 안내 요청은 받아 두고 끝나면 배정
+- 로봇이 `localize_wait_sec`(60초) 안에 연결 · 위치 확인이 안 되면 건너뜀, `localize_timeout_sec`(90초) 안에 끝이 안 오면 알림 뒤 다음 로봇
+- 쉬는 중이 아니면 로봇이 `LOCALIZED reason=busy`로 거절한다 (그 로봇은 건너뜀)
 
 ## 실제 로봇 쪽에서 맞춰야 할 것
 

@@ -161,6 +161,16 @@ dock / dock_in(D2 · D3) / entrance(D1) 정밀 정차가 끝나면 `RobotEvent.D
 CMD_DONE 바로 앞에, undock / entrance_exit(빠지기)가 끝나면 `UNDOCKED`(node = 떠난 도크)를 보낸다.
 로봇 로그 `===== DOCKED D1 ok =====`, 서버 로그 `FLEET pinky2 event DOCKED D1` + 매장 화면 알림 · 이력(DOCK).
 
+## 위치 맞추기 (Control LOCALIZE, fleet_msgs v11)
+
+시스템 시작 전에 서버가 한 대씩 보낸다 (`main_service/launch/system.launch.xml`). 쉬는 중일 때만 한다 (아니면 `LOCALIZED reason=busy`)
+1. 앞으로 `fwd`(기본 0.15 m, `localize_speed` 0.05 m/s) — 도크 벽에서 떨어져 돌 자리 확보
+2. 제자리 `spin_deg`(기본 360°) — AMCL이 주변을 다 보고 위치를 맞춤. 회전 · 직진 방향은 odom yaw (AMCL 보정이 안 섞임)
+3. 처음 방향으로 맞추고 1초 멈춤 → 같은 거리만큼 뒤로 (거리 = 속도 x 시간, 지도 좌표는 AMCL 보정으로 튀어서 안 씀)
+4. `RobotEvent LOCALIZED` (reason 비면 성공)
+- 노드별 값: `precision_stops.yaml`의 `<도크>.localize: {fwd: 0.15, spin_deg: 360}` (없으면 `fleet_agent.yaml` 기본값)
+- PAUSE면 멈췄다 RESUME에 이어서, CANCEL이면 그만두고 `LOCALIZED reason=cancel`. LiDAR 장애물 정지는 안 씀 (조금만 움직임)
+
 ## 한 번에 켜기 (robot_system.launch.xml)
 
 bringup -> (2초) Nav2(맵 pinkytorang_map_v5, 설정 nav_v5: 둘 다 레포) -> 초기 위치 + fleet_agent 를 한 명령으로 켠다.

@@ -56,7 +56,7 @@ void FleetLinkManager::sendMove(const std::string& robot_id, const MoveCmd& cmd)
 void FleetLinkManager::sendControl(const std::string& robot_id, ControlCmd cmd) {
   if (!links_.count(robot_id)) return;
   fleet_msgs::msg::Control msg;
-  msg.command = static_cast<uint8_t>(cmd);  // PAUSE=0, RESUME=1, CANCEL=2 로 값이 같다
+  msg.command = static_cast<uint8_t>(cmd);  // PAUSE=0, RESUME=1, CANCEL=2, LOCALIZE=3 로 값이 같다
   links_[robot_id].control_pub->publish(msg);
   logLine("FLEET", robot_id + " Control " + toString(cmd));
 }
@@ -98,8 +98,8 @@ void FleetLinkManager::onState(const std::string& robot_id, const fleet_msgs::ms
 
 void FleetLinkManager::onEvent(const std::string& robot_id, const fleet_msgs::msg::RobotEvent& msg) {
   markReceived(robot_id);
-  static const char* names[] = {"NODE_REACHED", "CMD_DONE", "CMD_FAILED", "?", "BLOCKED", "DOCKED", "UNDOCKED"};
-  std::string name = msg.type < 7 ? names[msg.type] : std::to_string(msg.type);
+  static const char* names[] = {"NODE_REACHED", "CMD_DONE", "CMD_FAILED", "?", "BLOCKED", "DOCKED", "UNDOCKED", "LOCALIZED"};
+  std::string name = msg.type < 8 ? names[msg.type] : std::to_string(msg.type);
   logLine("FLEET", robot_id + " event " + name + " " + msg.node_id + " (cmd " + std::to_string(msg.cmd_id) + ")" +
                        (msg.reason.empty() ? "" : " " + msg.reason));
   if (tasks_) tasks_->onRobotEvent(robot_id, msg.type, msg.cmd_id, msg.node_id, msg.reason);

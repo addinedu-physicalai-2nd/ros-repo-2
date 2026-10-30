@@ -5,7 +5,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from fleet_agent.core import (RESUME, CMD_DONE, CMD_FAILED, DOCKED, EV_BLOCKED, FORWARD, NODE_REACHED, REVERSE,  # noqa: E402
+from fleet_agent.core import (CANCEL, LOCALIZE, LOCALIZED, PAUSE, RESUME, CMD_DONE, CMD_FAILED, DOCKED, EV_BLOCKED, FORWARD, NODE_REACHED, REVERSE,  # noqa: E402
                               UNDOCKED, BlockPolicy, Driver,
                               ObstacleClass, ReverseControl, wrap)
 
@@ -788,6 +788,48 @@ def test_entrance_d1_exit_then_greet_then_nav():
     ev = [(t, n) for t, n, _ in r.events]
     assert ev[0] == (UNDOCKED, 'D1')
     assert reached(r)[:2] == ['N1', 'N2']
+
+
+
+def test_localize_fwd_spin_back_then_event():
+    # Control LOCALIZE: 앞으로 0.15 m -> 360° -> 처음 방향 -> 뒤로 0.15 m (원래 자리) -> LOCALIZED
+    r, d = make(1.0, 1.0, 0.0)
+    d.last_node = 'D1'
+    d.on_control(LOCALIZE)
+    xs, turned = [], {'max': 0.0}
+
+    def hook(t):
+        xs.append(r.x)
+    run(r, d, 25, hook=hook)
+    ev = [(n, why) for t, n, why in r.events if t == LOCALIZED]
+    assert ev == [('D1', '')]
+    assert max(xs) > 1.12                              # 앞으로 나왔다가
+    assert abs(r.x - 1.0) < 0.02 and abs(r.y - 1.0) < 0.02   # 원래 자리로
+    assert abs(wrap(r.yaw)) < 0.2 and d.phase == 'idle' and d.loc is None
+
+
+def test_localize_busy_when_moving():
+    r, d = make(3.023, 1.200, 0.0, last_drive=FORWARD)
+    d.on_move(90, False, FORWARD, [('N14', 3.398, 1.200, 0.0)])
+    run(r, d, 0.5)
+    d.on_control(LOCALIZE)
+    assert [(n, why) for t, n, why in r.events if t == LOCALIZED][-1][1] == 'busy'
+
+
+def test_localize_pause_resume_and_cancel():
+    r, d = make(1.0, 1.0, 0.0)
+    d.last_node = 'D3'
+    d.on_control(LOCALIZE)
+    run(r, d, 1.0)
+    d.on_control(PAUSE)
+    x = r.x
+    run(r, d, 2.0, t0=1.0)
+    assert abs(r.x - x) < 1e-6                         # 멈춤 동안 안 움직임
+    d.on_control(RESUME)
+    run(r, d, 1.0, t0=3.0)
+    d.on_control(CANCEL)
+    assert [(n, why) for t, n, why in r.events if t == LOCALIZED] == [('D3', 'cancel')]
+    assert d.loc is None
 
 
 if __name__ == '__main__':

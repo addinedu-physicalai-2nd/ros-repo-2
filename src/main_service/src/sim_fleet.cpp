@@ -70,6 +70,10 @@ void SimFleet::sendControl(const std::string& robot_id, ControlCmd cmd) {
   Bot& b = bots_[robot_id];
   if (cmd == ControlCmd::PAUSE) b.paused = true;
   if (cmd == ControlCmd::RESUME) b.paused = false;
+  if (cmd == ControlCmd::LOCALIZE) {  // 앞으로 조금 -> 360° -> 뒤로 (시뮬레이션은 제자리에서 시간만)
+    if (b.running) pending_.push_back({b.id, EVENT_LOCALIZED, b.cmd_id, b.last_node, "busy"});
+    else b.loc_wait = 4.0;
+  }
 }
 
 void SimFleet::sendDisplay(const std::string& robot_id, const DisplayCmd& cmd) {
@@ -86,6 +90,11 @@ void SimFleet::step(Bot& b, double dt, std::vector<PendingEvent>& out) {
   if (docked) b.battery = std::min(100.0, b.battery + 2.0 * dt);
   else if (b.running && !b.paused) b.battery = std::max(0.0, b.battery - 0.4 * dt);
 
+  if (!b.paused && b.loc_wait > 0.0) {
+    b.loc_wait -= dt;
+    if (b.loc_wait <= 0.0) out.push_back({b.id, EVENT_LOCALIZED, b.cmd_id, b.last_node, ""});
+    return;
+  }
   if (b.paused || !b.running) return;
 
   if (b.dock_wait > 0.0) {  // 정밀 도킹 중

@@ -29,7 +29,7 @@ enum class TableState { FREE, RESERVED, OCCUPIED };
 // ---------------------------------------------------------------- 로봇 (fleet_msgs v7 숫자값 그대로. 메시지는 v5부터 같음)
 
 enum class RobotRunState : uint8_t { IDLE = 0, MOVING = 1, PAUSED = 2, BLOCKED = 3, ERROR = 4 };
-enum class ControlCmd : uint8_t { PAUSE = 0, RESUME = 1, CANCEL = 2 };
+enum class ControlCmd : uint8_t { PAUSE = 0, RESUME = 1, CANCEL = 2, LOCALIZE = 3 };  // LOCALIZE: 서버만 보냄 (HTTP 제어 아님)
 
 // RobotEvent.type 값
 const uint8_t EVENT_NODE_REACHED = 0;
@@ -38,6 +38,7 @@ const uint8_t EVENT_CMD_FAILED = 2;
 const uint8_t EVENT_BLOCKED = 4;
 const uint8_t EVENT_DOCKED = 5;      // (v10) 도킹 끝
 const uint8_t EVENT_UNDOCKED = 6;    // (v10) 도크에서 빠지기 끝
+const uint8_t EVENT_LOCALIZED = 7;   // (v11) 위치 맞추기 끝
 
 // ---------------------------------------------------------------- 서버 -> 로봇 명령 (ROS 메시지와 필드 1:1)
 

@@ -63,6 +63,22 @@ void TaskManager::start() {
     db_.saveTableState(tb.id, tb.state);
   }
   logLine("TASK", "시작. 다음 task 번호 " + std::to_string(next_task_id_));
+
+  // 시작 전 위치 맞추기: 설정(또는 --localize)의 로봇을 이름 순서대로 (pinky1 -> pinky2 -> pinky3)
+  for (const std::string& id : cfg_.localize_robots) {
+    if (robots_.count(id) && std::find(loc_queue_.begin(), loc_queue_.end(), id) == loc_queue_.end())
+      loc_queue_.push_back(id);
+    else if (!robots_.count(id))
+      logLine("TASK", "위치 맞추기: 설정 robots에 없는 로봇 " + id + " (무시)");
+  }
+  std::sort(loc_queue_.begin(), loc_queue_.end());
+  if (!loc_queue_.empty()) {
+    std::string names;
+    for (const std::string& id : loc_queue_) names += (names.empty() ? "" : ", ") + id;
+    record("TASK", "시작 전 위치 맞추기 차례: " + names + " (끝날 때까지 모든 로봇 작업 · 이동 안 함)");
+    loc_since_ = Clock::now();
+    loc_waiting_ = true;
+  }
 }
 
 // ================================================================ UI 요청
@@ -333,6 +349,16 @@ void TaskManager::onRobotEvent(const std::string& id, uint8_t type, uint32_t cmd
     if (reason.empty()) alert("INFO", id, node + " 도킹 완료");
     else alert("WARN", id, node + " 도킹 정밀 정차 실패: " + reason);
     record("DOCK", id + " " + node + " 도킹" + (reason.empty() ? "" : " 실패 " + reason));
+  } else if (type == EVENT_LOCALIZED) {
+    if (id == loc_cur_) {
+      if (reason.empty()) record("TASK", id + " 위치 맞추기 끝 (" + node + ")");
+      else alert("WARN", id, "위치 맞추기 못 함: " + reason);
+      loc_cur_ = "";
+      loc_waiting_ = false;
+      loc_since_ = Clock::now();
+      if (loc_queue_.empty()) alert("INFO", "", "시작 전 위치 맞추기 끝");
+      stepLocalize(Clock::now());
+    }
   } else if (type == EVENT_UNDOCKED) {
     // 도크에서 빠지기 끝 (D1: 교점에서 북쪽 / D2 · D3: N16 · N15) -> 이어서 이동
     if (reason.empty()) alert("INFO", id, node + "에서 출발");
@@ -372,6 +398,7 @@ void TaskManager::tick() {
   Clock::time_point now = Clock::now();
 
   traffic_.tick();  // 막혀서 기다리는 로봇: 우회 · 대기 시간 다시 판단
+  stepLocalize(now);
   recoverStuckTasks(now);
 
   // 테이블 확인 시간 초과 -> 일이 끝난 것으로 보고 출발
@@ -431,7 +458,56 @@ void TaskManager::processArrivals() {
 }
 
 bool TaskManager::robotUsable(const Robot& r) {
-  return r.seen && r.online && !r.paused && !r.fault && traffic_.isLocalized(r.id);
+  return r.seen && r.online && !r.paused && !r.fault && traffic_.isLocalized(r.id) && !localizing(r.id);
+}
+
+// 위치 맞추기가 다 끝날 때까지는 로봇 전부 작업 · 이동 안 함 (도크 앞에서 도는 로봇 옆으로 다른 로봇이 지나가지 않게)
+bool TaskManager::localizing(const std::string& /*id*/) const {
+  return !loc_cur_.empty() || !loc_queue_.empty();
+}
+
+// 시작 전 위치 맞추기: 맨 앞 로봇이 연결 · 위치 확인되고 쉬고 있으면 LOCALIZE -> LOCALIZED가 오면 다음 로봇
+//   연결이 localize_wait_sec 안에 안 되면 건너뜀 (그 로봇은 위치 맞추기 없이 평소처럼 쓰임)
+//   LOCALIZED가 localize_timeout_sec 안에 안 오면 알림 뒤 다음 로봇
+void TaskManager::stepLocalize(Clock::time_point now) {
+  if (!loc_cur_.empty()) {
+    if (now - loc_since_ > std::chrono::seconds(cfg_.localize_timeout_sec)) {
+      alert("WARN", loc_cur_, "위치 맞추기 응답 없음 (" + std::to_string(cfg_.localize_timeout_sec) + "초) -> 다음 로봇");
+      loc_cur_ = "";
+      loc_since_ = now;
+      loc_waiting_ = true;
+      dirty_ = true;
+      if (loc_queue_.empty()) alert("INFO", "", "시작 전 위치 맞추기 끝");
+    } else {
+      return;
+    }
+  }
+  while (!loc_queue_.empty()) {
+    const std::string id = loc_queue_.front();
+    Robot& r = robots_[id];
+    bool ready = r.seen && r.online && !r.paused && !r.fault && traffic_.isLocalized(id) &&
+                 traffic_.isStationary(id) && r.task_id < 0;
+    if (ready) {
+      loc_queue_.erase(loc_queue_.begin());
+      loc_cur_ = id;
+      loc_since_ = now;
+      loc_waiting_ = false;
+      if (fleet_) fleet_->sendControl(id, ControlCmd::LOCALIZE);
+      record("TASK", id + " 위치 맞추기 시작 (" + traffic_.currentNode(id) + ")");
+      dirty_ = true;
+      return;
+    }
+    if (!loc_waiting_) {
+      loc_waiting_ = true;
+      loc_since_ = now;
+    }
+    if (now - loc_since_ <= std::chrono::seconds(cfg_.localize_wait_sec)) return;  // 아직 기다림
+    alert("WARN", id, "위치 맞추기 건너뜀: " + std::to_string(cfg_.localize_wait_sec) + "초 안에 연결 · 위치 확인이 안 됨");
+    loc_queue_.erase(loc_queue_.begin());
+    loc_since_ = now;
+    dirty_ = true;
+    if (loc_queue_.empty()) alert("INFO", "", "시작 전 위치 맞추기 끝");
+  }
 }
 
 bool TaskManager::robotFree(const Robot& r) {

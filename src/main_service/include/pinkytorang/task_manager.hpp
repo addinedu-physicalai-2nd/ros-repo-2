@@ -114,6 +114,12 @@ class TaskManager {
     bool stuck_alerted = false;      // 실은 채 멈춤 알림 보냄
   };
 
+  // 시작 전 위치 맞추기 (Control LOCALIZE). 이름 순서대로 한 대씩
+  std::vector<std::string> loc_queue_;   // 아직 차례가 안 온 로봇
+  std::string loc_cur_;                  // 지금 하는 로봇 ("" = 없음)
+  Clock::time_point loc_since_;          // loc_cur_에 보낸 시각 / 맨 앞 로봇을 기다리기 시작한 시각
+  bool loc_waiting_ = false;             // 맨 앞 로봇이 연결 · 위치 확인되기를 기다리는 중
+
   struct Table {
     std::string id;
     std::string node;
@@ -147,7 +153,9 @@ class TaskManager {
   void setTable(Table& tb, TableState s, int task_id);
 
   // 도우미
-  bool robotUsable(const Robot& r);
+  bool robotUsable(const Robot& r);   // 위치 맞추기 차례를 기다리거나 하는 중이면 false
+  void stepLocalize(Clock::time_point now);   // 시작 전 위치 맞추기: 한 대씩 차례로 LOCALIZE
+  bool localizing(const std::string& id) const;   // 위치 맞추기 진행 중 (다 끝날 때까지 모든 로봇 true)
   bool robotFree(const Robot& r);      // 배정 가능: 쓸 수 있고 · 충전 아님 · 작업 없음 · 귀가 중 아님
   bool hasWaitingGuide() const;
   bool tableBusy(const std::string& table) const;  // 그 테이블로 가는 중이거나 서 있는 로봇이 있나 (종류 상관없이)

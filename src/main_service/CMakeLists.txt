@@ -51,5 +51,6 @@ if(ament_cmake_FOUND)
 
   install(TARGETS main_service main_service_sim DESTINATION lib/${PROJECT_NAME})
   install(DIRECTORY config DESTINATION share/${PROJECT_NAME})
+  install(DIRECTORY launch DESTINATION share/${PROJECT_NAME})   # system.launch.xml (실행은 소스 경로로)
   ament_package()
 endif()

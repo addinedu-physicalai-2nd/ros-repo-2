@@ -639,6 +639,15 @@ target_link_libraries(main_service rclcpp::rclcpp ${fleet_msgs_TARGETS})
 
 ## 10. 변경 이력
 
+### v11 (상수 추가, 필드 변경 없음)
+
+| 구분 | 내용 |
+|---|---|
+| Control | `LOCALIZE=3` 위치 맞추기 (쉬는 중일 때만): 앞으로 조금 → 제자리 360° → 뒤로 |
+| RobotEvent | `LOCALIZED=7` 위치 맞추기 끝 (node = 지금 노드, reason = 못 했으면 이유 busy / cancel / replaced) |
+| 서버 | 시작 전에 준비된 로봇(launch `pinkyN:=true`)에게 이름 순서대로 한 대씩. 다 끝날 때까지 모든 로봇 작업 · 이동 안 함 |
+| package.xml | 0.11.0 (v10 때 0.9.0 그대로였음) |
+
 ### v10 (RobotEvent 상수 추가, 필드 변경 없음)
 
 | 구분 | 내용 |

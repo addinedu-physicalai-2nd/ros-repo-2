@@ -70,7 +70,9 @@ class FleetAgent(Node):
                              reverse=rev, policy=policy, nav_retries=p('nav_retries', 1).value,
                              check_turn_deg=p('guide_check_turn_deg', 45.0).value,
                              check_gap=p('guide_check_gap_m', 0.8).value,
-                             corridor=p('corridor_handover', True).value)
+                             corridor=p('corridor_handover', True).value,
+                             loc_fwd=p('localize_fwd_m', 0.15).value, loc_speed=p('localize_speed', 0.05).value,
+                             loc_spin_deg=p('localize_spin_deg', 360.0).value, loc_w=p('localize_w', 0.6).value)
         self.driver.last_node = self.start_node
         self.driver.leave_from = self.start_node   # 켤 때 선 노드에 leave(언도킹 등)가 있으면 첫 출발 때 먼저
 
@@ -132,7 +134,7 @@ class FleetAgent(Node):
         self.driver.on_move(msg.cmd_id, append, msg.drive, wps, guide, goal)
 
     def on_control(self, msg):
-        self.get_logger().info(f'Control {["PAUSE", "RESUME", "CANCEL"][msg.command] if msg.command < 3 else msg.command}')
+        self.get_logger().info(f'Control {["PAUSE", "RESUME", "CANCEL", "LOCALIZE"][msg.command] if msg.command < 4 else msg.command}')
         self.driver.on_control(msg.command)
 
     def on_display(self, msg):
@@ -164,8 +166,9 @@ class FleetAgent(Node):
         m.reason = reason
         self.event_pub.publish(m)
 
-        name = {0: 'NODE_REACHED', 1: 'CMD_DONE', 2: 'CMD_FAILED', 4: 'BLOCKED', 5: 'DOCKED', 6: 'UNDOCKED'}.get(etype, str(etype))
-        if etype in (5, 6):   # 도킹 · 언도킹: 눈에 띄게 (서버에도 같은 event로 알림)
+        name = {0: 'NODE_REACHED', 1: 'CMD_DONE', 2: 'CMD_FAILED', 4: 'BLOCKED', 5: 'DOCKED', 6: 'UNDOCKED',
+                7: 'LOCALIZED'}.get(etype, str(etype))
+        if etype in (5, 6, 7):   # 도킹 · 언도킹 · 위치 맞추기: 눈에 띄게 (서버에도 같은 event로 알림)
             self.get_logger().info(f'===== {name} {node} {reason or "ok"} =====')
         else:
             self.get_logger().info(f'event {name} {node} {reason}')

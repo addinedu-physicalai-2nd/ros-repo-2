@@ -69,6 +69,11 @@ struct Config {
   double ready_battery_pct = 80.0; // 충전 중이면 이 이상이 돼야 다시 배정
 
   bool require_dock_start = true;  // 처음 위치는 도킹 노드에서만 인정
+  // 시작 전 위치 맞추기 (Control LOCALIZE): 이 로봇들에게 이름 순서대로 한 대씩. 비우면 안 함
+  //   system.launch.xml의 pinky1:=true ... 가 main_service --localize 로 넘겨 덮어씀
+  std::vector<std::string> localize_robots;
+  int localize_wait_sec = 60;      // 로봇이 연결 · 위치 확인될 때까지 기다리는 최대 시간 (넘으면 건너뜀)
+  int localize_timeout_sec = 90;   // LOCALIZE 하나가 끝나기를 기다리는 최대 시간 (넘으면 알림 뒤 다음 로봇)
   bool stay_at_start = false;      // 시험용: 도킹 대신 켤 때 노드를 집으로 (쉬면 거기서 대기, 작업 끝나면 거기로 돌아감)
   double comm_timeout_sec = 3.0; // state가 이만큼 안 오면 통신 끊김
   int lock_lookahead = 2;        // 로봇 앞으로 미리 잡아 두는 lock 노드 수

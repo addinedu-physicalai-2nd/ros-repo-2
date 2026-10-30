@@ -42,6 +42,7 @@ std::string toString(Confirm v) {
 std::string toString(ControlCmd v) {
   if (v == ControlCmd::PAUSE) return "PAUSE";
   if (v == ControlCmd::RESUME) return "RESUME";
+  if (v == ControlCmd::LOCALIZE) return "LOCALIZE";
   return "CANCEL";
 }
 

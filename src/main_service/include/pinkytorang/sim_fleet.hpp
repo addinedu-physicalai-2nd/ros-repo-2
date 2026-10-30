@@ -49,6 +49,7 @@ class SimFleet : public IFleetOut {
     std::vector<PathPoint> path;     // 남은 Waypoint (+ 그 칸을 후진으로 가는지)
     bool paused = false;
     double dock_wait = 0.0;          // 남은 정밀 도킹 시간 (초)
+    double loc_wait = 0.0;           // 남은 위치 맞추기 시간 (초, Control LOCALIZE)
     double battery = 90.0;           // %
   };
 

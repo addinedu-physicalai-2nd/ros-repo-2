@@ -18,11 +18,11 @@ REVERSE = 1
 # RobotState.state
 IDLE, MOVING, PAUSED, BLOCKED, ERROR = 0, 1, 2, 3, 4
 # RobotEvent.type
-NODE_REACHED, CMD_DONE, CMD_FAILED, EV_BLOCKED, DOCKED, UNDOCKED = 0, 1, 2, 4, 5, 6
+NODE_REACHED, CMD_DONE, CMD_FAILED, EV_BLOCKED, DOCKED, UNDOCKED, LOCALIZED = 0, 1, 2, 4, 5, 6, 7
 DOCK_METHODS = ('dock', 'dock_in', 'entrance')          # 도킹 정밀 정차 -> 끝나면 DOCKED
 UNDOCK_METHODS = ('undock', 'entrance_exit')           # 도킹에서 빠지기 (leave) -> 끝나면 UNDOCKED
 # Control.command
-PAUSE, RESUME, CANCEL = 0, 1, 2
+PAUSE, RESUME, CANCEL, LOCALIZE = 0, 1, 2, 3
 
 
 def wrap(a):
@@ -281,8 +281,14 @@ class Driver:
     """
 
     def __init__(self, io, stops, pass_tol=0.08, yaw_tol=0.15, done_grace=0.5, reverse=None, policy=None,
-                 nav_retries=1, check_turn_deg=45.0, check_gap=0.8, corridor=True):
+                 nav_retries=1, check_turn_deg=45.0, check_gap=0.8, corridor=True,
+                 loc_fwd=0.15, loc_speed=0.05, loc_spin_deg=360.0, loc_w=0.6, loc_settle=1.0):
         self.io = io
+        # 위치 맞추기 (Control LOCALIZE): 앞으로 fwd -> 제자리 spin_deg -> settle초 멈춤 -> 뒤로 fwd -> LOCALIZED
+        #   노드별 값은 precision_stops <노드>.localize: {fwd, spin_deg} (없으면 이 기본값)
+        self.loc_fwd, self.loc_speed, self.loc_spin_deg = loc_fwd, loc_speed, loc_spin_deg
+        self.loc_w, self.loc_settle = loc_w, loc_settle
+        self.loc = None               # 진행 중인 위치 맞추기 {stage, ...}
         self.stops = stops
         self.pass_tol = pass_tol      # 중간 노드 통과 판정 거리 (다음 노드로 바로 넘어감)
         self.yaw_tol = yaw_tol
@@ -343,6 +349,8 @@ class Driver:
         if not guide:
             self.in_guide = False     # 안내가 끝났다 (복귀 · 서빙)
         if not append:  # REPLACE: 지금 가던 것까지 버리고 새로
+            if self.loc is not None:
+                self._localize_end('replaced')
             if self.phase == 'leave' and self.leave_req:
                 self.leave_from = self.leave_req['node']   # 아직 못 떠났다 -> 새 명령 출발 때 다시
             self._stop_motion()
@@ -368,6 +376,11 @@ class Driver:
             self.grace_until = self.now
 
     def on_control(self, cmd):
+        if cmd == LOCALIZE:
+            self._localize_start()
+            return
+        if cmd == CANCEL and self.loc is not None:
+            self._localize_end('cancel')
         if cmd == PAUSE:
             self.paused = True
             self._stop_motion(keep=True)
@@ -579,6 +592,8 @@ class Driver:
                 if then_done:
                     self.prec_done_node = self.cur.node_id   # tape / dock_in을 이미 함
                 self._reached(pose)
+        elif self.phase == 'localize':
+            self._tick_localize(pose)
         elif self.phase == 'grace':
             if len(self.queue):
                 self._start_next(pose)
@@ -839,6 +854,72 @@ class Driver:
         self.io.direction('STOP')
         if self.cur.guide and self._at_goal(self.cur):
             self.io.guide({'action': 'arrive', 'node': self.cur.node_id})  # 도착 효과 (기다리지 않음)
+
+    # ------------------------------------------------------------ 위치 맞추기 (Control LOCALIZE)
+    def _localize_start(self):
+        """쉬는 중일 때만: 앞으로 조금 나와 제자리 한 바퀴 (AMCL이 주변을 다 봄) -> 같은 만큼 뒤로 (원래 자리)"""
+        if self.phase != 'idle' or len(self.queue) or self.cur is not None or self.paused or self.error:
+            self.io.log(f'위치 맞추기 못 함: 일하는 중 (phase {self.phase})')
+            self.io.event(LOCALIZED, self.queue.cmd_id, self.last_node, 'busy')
+            return
+        cfg = dict(self.stops.get(self.last_node, {}).get('localize') or {})
+        self.loc = {'stage': 'fwd', 'fwd': float(cfg.get('fwd', self.loc_fwd)),
+                    'spin': math.radians(float(cfg.get('spin_deg', self.loc_spin_deg))),
+                    'done': 0.0, 'turned': 0.0, 'yaw0': None, 'prev_yaw': None, 't': None}
+        self.phase = 'localize'
+        self.io.direction('STOP')     # 도크 앞 좁은 곳: LiDAR 정지 안 씀 (아주 조금만 움직임)
+        self.io.log(f'위치 맞추기 시작 ({self.last_node}): 앞 {self.loc["fwd"]:.2f} m -> '
+                    f'{math.degrees(self.loc["spin"]):.0f}° -> 뒤 {self.loc["fwd"]:.2f} m')
+
+    def _loc_yaw(self, pose):
+        """회전 · 직진 방향 유지는 odom yaw (AMCL 보정이 안 섞임). 없으면 지도 yaw"""
+        oy = self._odom_yaw()
+        return oy if oy is not None else pose[2]
+
+    def _tick_localize(self, pose):
+        L = self.loc
+        dt = 0.0 if L['t'] is None else max(0.0, min(0.2, self.now - L['t']))
+        L['t'] = self.now
+        yaw = self._loc_yaw(pose)
+        if L['yaw0'] is None:
+            L['yaw0'] = yaw
+        st = L['stage']
+        if st in ('fwd', 'back'):
+            # 직진 거리는 속도 x 시간 (지도 좌표는 360° 뒤 AMCL이 고치면 튀어서 안 씀). 방향은 처음 yaw 유지
+            if L['done'] >= L['fwd']:
+                self.io.cmd_vel(0.0, 0.0)
+                if st == 'fwd':
+                    L['stage'], L['done'], L['prev_yaw'] = 'spin', 0.0, yaw
+                else:
+                    self._localize_end('')
+                return
+            w = clamp(1.5 * wrap(L['yaw0'] - yaw), 0.3)
+            v = self.loc_speed if st == 'fwd' else -self.loc_speed
+            self.io.cmd_vel(v, w)
+            L['done'] += self.loc_speed * dt
+        elif st == 'spin':
+            L['turned'] += abs(wrap(yaw - L['prev_yaw']))
+            L['prev_yaw'] = yaw
+            if L['turned'] >= L['spin'] - 0.05:
+                self.io.cmd_vel(0.0, 0.0)
+                L['stage'], L['wait'] = 'settle', self.loc_settle
+                return
+            self.io.cmd_vel(0.0, self.loc_w)
+        elif st == 'settle':      # AMCL이 맞출 시간 + 처음 방향으로 다시 맞춤
+            w, done = turn_command(yaw, L['yaw0'], tol=self.yaw_tol)
+            self.io.cmd_vel(0.0, 0.0 if done else w)
+            if done:
+                L['wait'] -= dt
+                if L['wait'] <= 0.0:
+                    L['stage'], L['done'] = 'back', 0.0
+
+    def _localize_end(self, reason):
+        self.io.cmd_vel(0.0, 0.0)
+        self.loc = None
+        if self.phase == 'localize':
+            self.phase = 'idle'
+        self.io.log(f'위치 맞추기 끝 ({self.last_node}){" " + reason if reason else ""}')
+        self.io.event(LOCALIZED, self.queue.cmd_id, self.last_node, reason)
 
     def _travel_to(self, pose, step):
         """축 따라 뒤로 (pose -> step 노드) 남은 거리 (지도 좌표, 옆으로 비킨 도크는 그 줄까지)"""
