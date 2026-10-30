@@ -21,6 +21,7 @@ fleet_agent:
     nav_ok_tolerance: 0.10       # Nav2가 성공이라는데 노드에서 이보다 멀면 다시 보냄 (최대 3번. 목표 바꿀 때 옛 목표 성공이 섞이는 것 막기)
     guide_check_turn_deg: 45.0   # 안내 중 이보다 크게 꺾이는 노드에서 멈춰 뒤돌아 손님 확인
     guide_check_gap_m: 0.8       # 바로 전 인사 · 확인 자리에서 이 안이면 확인 안 함 (맵이 작아서 너무 자주 서지 않게)
+    guide_check_every_node: true # true = 꺾임과 상관없이 지나가는 노드마다 뒤돌아 손님 확인 (도착지는 빼고)
     dynamic_wait_sec: 3.0        # 사람: 이만큼 기다림
     dynamic_ask_sec: 5.0         # 사람: 그다음 LCD '지나갈게요' -> 이만큼 뒤 서버에 BLOCKED
     static_wait_sec: 2.0         # 물건: 이만큼 확인하고 BLOCKED
@@ -45,14 +46,24 @@ obstacle:
     dynamic_move_m: 0.04
     static_sec: 2.0
 
+camera:
+  ros__parameters:                    # camera_node: 카메라를 혼자 열고 발행 (docking · guide · detect_view가 구독)
+    width: 640                        # marker_dock 보정(FX) 기준 크기. 바꾸면 marker_dock --calibrate 다시
+    height: 480
+    fps: 15.0
+    rotate_180: true                  # 카메라가 거꾸로 달림 -> 똑바로 돌려서 발행 (구독하는 쪽은 안 돌림)
+    publish_compressed: true          # /camera/image_raw/compressed (PC guide_view용. 구독자가 있을 때만 압축)
+
 guide:
   ros__parameters:
-    camera_topic: /camera/image_raw   # sensor_msgs/Image (bgr8 / rgb8)
+    camera_topic: /camera/image_raw   # sensor_msgs/Image (bgr8 / rgb8). camera_node가 발행
     camera_compressed: false          # true = sensor_msgs/CompressedImage
     class_name: toy_person            # YOLO 클래스 이름 (손님). models/best.pt = yolov8n: toy_person / toy_car / cone
     conf: 0.5
     infer_hz: 4.0                     # 확인 중에만 이만큼 YOLO (라즈베리파이 CPU)
     confirm: 2                        # 연속으로 이만큼 보이면 찾음
-    wait_sec: 30.0                    # 이 안에 못 찾으면 손님 놓침 -> 서버에 guest_lost
+    wait_sec: 30.0                    # 이 안에 못 찾으면 손님 놓침 -> 서버에 guest_lost -> 안내 실패 · 로봇 집(D1)으로
+    welcome_on_request: true          # true = 테이블을 고르면(greet 요청) 바로 환영 효과, 그다음 손님 기다림
+                                      # false = 손님을 찾았을 때 환영
     effects: true                     # LCD 얼굴 · LED · 부저
     require_detector: false           # true = 모델 없으면 실패, false = 모델 없으면 바로 OK (시험용)

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""주방 통로 · 도크 기록 도구 (혼자 실행. fleet_agent는 끄고 bringup + 바닥 센서만 켜고)
+"""주방 통로 · 도크 기록 도구 (혼자 실행. fleet_agent는 끄고 bringup + 바닥 센서 + camera_node만 켜고)
+  카메라는 camera_node 영상을 구독 (ros2 run fleet_agent camera_node). camera_node 없이 직접 열려면 --direct
 
   ros2 run fleet_agent dock_record all            # D3에 손으로 반듯하게 넣고: 로봇이 직접 d3 · n15 · n15s · n14s · n14e
   ros2 run fleet_agent dock_record dock --dock d2 # 도크 쪽만 (d2 · n16 · n16s)
@@ -44,6 +45,8 @@ def main():
     ap.add_argument('--size', type=float, default=0.05, help='align: 마커 한 변 m (기본 5 cm)')
     ap.add_argument('--n15-tz', type=float, default=0.15, help='all/dock: N15 = 마커 3까지 카메라 거리 m')
     ap.add_argument('--n14-tz', type=float, default=0.13, help='all: N14 = 마커 5(남쪽 벽)까지 카메라 거리 m')
+    ap.add_argument('--direct', action='store_true',
+                    help='camera_node 없이 카메라를 직접 엶 (camera_node · docking 노드가 꺼져 있어야 함)')
     args, _ = ap.parse_known_args()
     if args.cmd == 'check' and args.dock == 'd1':
         print(entrance.check())
@@ -83,6 +86,10 @@ def main():
     ex.add_node(node)
     th = threading.Thread(target=ex.spin, daemon=True)
     th.start()
+
+    def open_cam(marker):
+        # 기본: camera_node의 /camera/image_raw 구독 (executor 스레드가 영상을 받음). --direct = 예전처럼 직접 엶
+        return md.Camera(marker) if args.direct else md.Camera(marker, node, spin=False)
     cam = None
     mv = Motion(node, pub, None, tf_buf, ir, dict(DEFAULTS))
     result = None
@@ -108,7 +115,7 @@ def main():
                         md.log(f'[라이다] {side} 벽: 안 보임')
                 result = '확인 끝 (로봇이 남쪽을 보면 왼쪽 = 동쪽 주방, 오른쪽 = 서쪽 칸막이)'
         elif args.cmd == 'align':
-            cam = md.Camera(args.id)
+            cam = open_cam(args.id)
             _set_size(args.size)
             m = cam.measure_stable(frames=30)
             if m is None:
@@ -119,10 +126,10 @@ def main():
                 result = (f'저장: 거리 {m["tz"] * 100:.1f} cm, 방위각 {math.degrees(bearing(m)):+.2f}°, '
                           f'기울기 {math.degrees(m["yaw"]):+.1f}° -> {path}')
         elif args.cmd == 'd1':
-            cam = md.Camera(1)
+            cam = open_cam(1)
             result = entrance.Entrance(mv, cam, md.log, lidar, line_tz=args.line_tz).record()
         else:
-            cam = md.Camera(cfg['marker'])
+            cam = open_cam(cfg['marker'])
             st = Steps(mv, cam, md.log, lidar)
             result = st.record_all(cfg, args.n15_tz, args.n14_tz, dock_only=(args.cmd == 'dock'))
     except KeyboardInterrupt:

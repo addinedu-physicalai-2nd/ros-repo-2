@@ -19,7 +19,7 @@ import time
 import numpy as np
 import rclpy
 from rclpy.node import Node
-from rclpy.qos import QoSProfile, ReliabilityPolicy
+from rclpy.qos import QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
 from sensor_msgs.msg import CompressedImage, Image
 from std_msgs.msg import String
 
@@ -40,6 +40,7 @@ class GuideNode(Node):
         self.confirm = int(p('confirm', 2).value)
         self.effects = p('effects', True).value
         self.require_detector = p('require_detector', False).value
+        self.welcome_first = p('welcome_on_request', True).value   # greet가 오면(테이블 선택) 바로 환영
 
         self.frame = None
         self.frame_t = 0.0
@@ -52,7 +53,7 @@ class GuideNode(Node):
         self.create_subscription(String, '/guide/request', self.on_request, rel)
         self.create_subscription(String, '/guide/cancel', self.on_cancel, rel)
         img_type = CompressedImage if self.compressed else Image
-        self.create_subscription(img_type, self.camera_topic, self.on_image, 1)
+        self.create_subscription(img_type, self.camera_topic, self.on_image, qos_profile_sensor_data)   # camera_node = best effort
         self.get_logger().info(f'guide 노드 시작 (카메라 {self.camera_topic}, '
                                f'{"YOLO " + self.class_name if self.model else "감지기 없음"})')
 
@@ -103,11 +104,13 @@ class GuideNode(Node):
             return
         if action not in ('greet', 'watch'):
             return
+        if action == 'greet' and self.welcome_first:
+            self.effect('welcome')               # 테이블을 고르자마자 환영 (손님 찾기는 그다음)
         if self.model is None:
             if self.require_detector:
                 self.reply(rid, False, 'no_detector')
             else:
-                if action == 'greet':
+                if action == 'greet' and not self.welcome_first:
                     self.effect('welcome')
                 self.reply(rid, True, 'no_detector')
             return
@@ -146,7 +149,7 @@ class GuideNode(Node):
                 seen = False
             hits = hits + 1 if seen else 0
             if hits >= self.confirm:
-                if action == 'greet':
+                if action == 'greet' and not self.welcome_first:
                     self.effect('welcome')
                 self.reply(rid, True, 'guest_seen')
                 return

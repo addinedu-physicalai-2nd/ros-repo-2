@@ -69,7 +69,7 @@ class DockingNode(Node):
                                  self.on_ir, 10)
         self.lidar = Lidar(self, self.tf_buf)      # 통로 벽 (corridor · tape corridor · dock_in)
 
-        self.cam = None            # 처음 마커 도킹 때 열고 계속 씀
+        self.cam = None            # 처음 마커 도킹 때 구독 시작 (카메라는 camera_node가 열고 있음)
         self.job = None            # 지금 요청
         self.job_start = 0.0
         self.cancel_flag = False
@@ -193,7 +193,7 @@ class DockingNode(Node):
         md.load_cam_file()
         md.open_log(tag)
         if self.cam is None:
-            self.cam = md.Camera(marker_id)  # picamera2 (처음 1초 걸림)
+            self.cam = md.Camera(marker_id, self, spin=False)  # camera_node 영상 구독 (카메라를 쥐지 않음)
         self.cam.id = marker_id
         return md.Docker(self, self.cmd_pub, self.tf_buf, self.cam, moving=True, spin=False,
                          cancelled=self.cancelled)
