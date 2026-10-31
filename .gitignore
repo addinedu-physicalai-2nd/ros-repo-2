@@ -18,3 +18,4 @@ __pycache__/
 # 편집기
 .vscode/
 .idea/
+ros_ws/src/fleet_agent/models/*.pt
