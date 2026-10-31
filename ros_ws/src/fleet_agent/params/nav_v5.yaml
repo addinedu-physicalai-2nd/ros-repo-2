@@ -185,7 +185,7 @@ local_costmap:
       height: 1
       resolution: 0.025
       #robot_radius: 0.22
-      footprint: '[[0.06, 0.06], [0.06, -0.06], [-0.14, -0.06], [-0.14, 0.06]]'
+      footprint: '[[0.06, 0.06], [0.06, -0.06], [-0.1, -0.06], [-0.1, 0.06]]'
       plugins: ["obstacle_layer", "inflation_layer"]   # v5: voxel -> 2D obstacle (2D 라이다, CPU)
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
@@ -219,7 +219,7 @@ global_costmap:
       global_frame: map
       robot_base_frame: base_footprint
       #robot_radius: 0.22
-      footprint: '[[0.06, 0.06], [0.06, -0.06], [-0.14, -0.06], [-0.14, 0.06]]'
+      footprint: '[[0.06, 0.06], [0.06, -0.06], [-0.1, -0.06], [-0.1, 0.06]]'
       resolution: 0.025
       track_unknown_space: true
       plugins: ["static_layer", "inflation_layer"]
