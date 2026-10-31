@@ -49,9 +49,9 @@ nodes:
   - {id: N7, type: PASS, lock: true, x: 0.603, y: -0.324, next: [N4, T4, N10]}
 
   # ---- 홀 3줄 (양방향) ----
-  - {id: N8, type: PASS, lock: true, x: 1.484, y: 0.071, next: [N5, T5, N11]}
-  - {id: N9, type: PASS, lock: true, x: 1.032, y: 0.092, next: [N6, T5, T6, N12]}
-  - {id: N10, type: PASS, lock: true, x: 0.612, y: 0.109, next: [N7, T6, N13]}
+  - {id: N8, type: PASS, lock: true, x: 1.484, y: 0.104, next: [N5, T5, N11]}
+  - {id: N9, type: PASS, lock: true, x: 1.032, y: 0.125, next: [N6, T5, T6, N12]}
+  - {id: N10, type: PASS, lock: true, x: 0.612, y: 0.142, next: [N7, T6, N13]}
 
   # ---- 홀 4줄: 맨 아랫길 (양방향, N13 -> N14만 일방) ----
   - {id: N11, type: PASS, lock: true, x: 1.458, y: 0.439, next: [N8, N12]}
@@ -70,8 +70,8 @@ nodes:
   - {id: T2, type: STOP, stop_kind: SERVE, table: T2, lock: true, x: 0.754, y: -0.904, next: [N3, N4]}
   - {id: T3, type: STOP, stop_kind: SERVE, table: T3, lock: true, x: 1.242, y: -0.455, next: [N5, N6]}
   - {id: T4, type: STOP, stop_kind: SERVE, table: T4, lock: true, x: 0.792, y: -0.430, next: [N6, N7]}
-  - {id: T5, type: STOP, stop_kind: SERVE, table: T5, lock: true, x: 1.267, y: -0.005, next: [N8, N9]}
-  - {id: T6, type: STOP, stop_kind: SERVE, table: T6, lock: true, x: 0.792, y: -0.005, next: [N9, N10]}
+  - {id: T5, type: STOP, stop_kind: SERVE, table: T5, lock: true, x: 1.267, y: 0.028, next: [N8, N9]}
+  - {id: T6, type: STOP, stop_kind: SERVE, table: T6, lock: true, x: 0.792, y: 0.028, next: [N9, N10]}
 
   # ---- 도킹 (후진 진입·전진 출차, 앞은 통로 쪽 = 왼쪽, 바구니는 벽 쪽) ----
   - {id: D1, type: STOP, stop_kind: DOCK, pocket: true, entry: REVERSE, lock: true, x: 1.824, y: 0.386, yaw: -0.077, next: [N1]}   # 입구 통로 (마커 1 · 6). 로봇은 N1에서 entrance로 통째로 (precision_stops)
