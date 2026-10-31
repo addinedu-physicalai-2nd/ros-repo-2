@@ -65,21 +65,21 @@ P1:  {method: tape, x_after: 0.04, timeout: 60, ir_black: 3800,           # 바�
 #   (face: [x, y]를 주면 T 좌표 대신 그 점을 봄. 지금은 안 씀)
 #   leave table_exit: 서빙 뒤 지금 방향으로 dist(m) 전진 -> 그다음 Nav2 (costmap 경계 벗어나기)
 #   (docking_node의 table · table_exit는 table_dock.py 구현 뒤 동작. 그 전엔 실패 -> Nav2 위치 인정)
-T1: {method: table, lines: 2, timeout: 60,
+T1: {method: table, lines: 2, timeout: 60, ir_black: 3800, confirm: 3,
      from: {N2: {marker: 11, target: t1l}, N3: {marker: 12, target: t1r}},
      leave: {method: table_exit, dist: 0.1}}
-T2: {method: table, lines: 2, timeout: 60,
+T2: {method: table, lines: 2, timeout: 60, ir_black: 3800, confirm: 3,
      from: {N3: {marker: 21, target: t2l}, N4: {marker: 22, target: t2r}},
      leave: {method: table_exit, dist: 0.1}}
-T3: {method: table, lines: 2, timeout: 60,
+T3: {method: table, lines: 2, timeout: 60, ir_black: 3800, confirm: 3,
      from: {N5: {marker: 31, target: t3l}, N6: {marker: 32, target: t3r}},
      leave: {method: table_exit, dist: 0.1}}
-T4: {method: table, lines: 2, timeout: 60,
+T4: {method: table, lines: 2, timeout: 60, ir_black: 3800, confirm: 3,
      from: {N6: {marker: 41, target: t4l}, N7: {marker: 42, target: t4r}},
      leave: {method: table_exit, dist: 0.1}}
-T5: {method: table, lines: 2, timeout: 60,
+T5: {method: table, lines: 2, timeout: 60, ir_black: 3800, confirm: 3,
      from: {N8: {marker: 51, target: t5l}, N9: {marker: 52, target: t5r}},
      leave: {method: table_exit, dist: 0.1}}
-T6: {method: table, lines: 2, timeout: 60,
+T6: {method: table, lines: 2, timeout: 60, ir_black: 3800, confirm: 3,
      from: {N9: {marker: 61, target: t6l}, N10: {marker: 62, target: t6r}},
      leave: {method: table_exit, dist: 0.1}}

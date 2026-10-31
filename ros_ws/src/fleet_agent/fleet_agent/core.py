@@ -885,6 +885,11 @@ class Driver:
             f = self.stops.get(nxt.node_id, {}).get('face')
             if f:
                 return math.atan2(float(f[1]) - self.cur.y, float(f[0]) - self.cur.x)
+        # 정렬(align) 노드 (N14): 들어온 방향 그대로 서게 (서버 yaw = 다음 노드 쪽이면 마커 4를 등져 270° 찾음)
+        if self.stops.get(self.cur.node_id, {}).get('method') == 'align' and self.prev_xy is not None:
+            px, py = self.prev_xy
+            if math.hypot(self.cur.x - px, self.cur.y - py) > 0.05:
+                return math.atan2(self.cur.y - py, self.cur.x - px)
         return self.cur.yaw
 
     def _table_next(self, nxt):

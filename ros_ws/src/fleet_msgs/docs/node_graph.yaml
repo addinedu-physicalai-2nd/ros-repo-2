@@ -38,10 +38,10 @@
 
 nodes:
   # ---- 홀 1줄: 윗길 (양방향) ----
-  - {id: N1, type: PASS, lock: true, x: 1.786, y: -0.820, next: [N2, D1]}   # 왼쪽 위, 입구 통로 위쪽 끝
+  - {id: N1, type: PASS, lock: true, x: 1.886, y: -0.820, next: [N2, D1]}   # 왼쪽 위, 입구 통로 위쪽 끝
   - {id: N2, type: PASS, lock: true, x: 1.496, y: -0.781, next: [N1, T1, N5]}
   - {id: N3, type: PASS, lock: true, x: 0.999, y: -0.775, next: [T1, T2, N6]}
-  - {id: N4, type: PASS, lock: true, x: 0.598, y: -0.763, next: [T2, N7]}   # P1에서 나오는 길의 합류점 (N4 -> P1 없음)
+  - {id: N4, type: PASS, lock: true, x: 0.620, y: -0.720, next: [T2, N7]}   # P1에서 나오는 길의 합류점 (N4 -> P1 없음)
 
   # ---- 홀 2줄 (양방향) ----
   - {id: N5, type: PASS, lock: true, x: 1.443, y: -0.332, next: [N2, T3, N8]}

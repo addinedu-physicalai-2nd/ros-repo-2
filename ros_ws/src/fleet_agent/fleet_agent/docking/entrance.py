@@ -33,6 +33,8 @@ END_MAX_M = 1.60
 SIDE_FAR = 0.60        # 통로 벽 찾는 범위 (corridor 기본 0.45보다 넓게: 입구 통로가 더 넓음)
 
 
+ENTRY_EXTRA = 0.087   # N1 -> 교점 직진이 기록보다 8.7 cm 모자랐음 (10/30 시스템 로그)
+
 def lines(pts):
     return side_lines(pts, along=WALL_ALONG_M, far=SIDE_FAR)
 
@@ -195,13 +197,23 @@ class Entrance(Steps):
         self.seen_at = seen_at if ref_done else None
         return h_c, U, end_at
 
-    def along6(self, h, tag):
-        """마커 6(남쪽 끝 벽)까지 통로 방향 거리. 비껴 있으면 돌아서 찾고 다시 h로. 없으면 None"""
-        m = self.see(6, 0.05, frames=15, find=True)
+    def along6(self, h, tag, M6=None):
+        """마커 6(남쪽 끝 벽)까지 통로 방향 거리. 없으면 None.
+        M6(앞에서 찾은 마커 6 odom 위치)가 있으면 그쪽으로 바로 돌려서 봄 (30° 무작정 찾기 안 함), 못 보면 그때만 찾기"""
+        m = None
+        if M6 is not None:
+            p = self.mv.dk.pose()
+            self.mv.dk.rotate_to(math.atan2(M6[1] - p[1], M6[0] - p[0]))
+            m = self.see(6, 0.05, frames=15)
+            if m is None:
+                self.log(f'[{tag}] 기억한 마커 6 쪽에서 안 보임 -> 찾기')
+        if m is None:
+            m = self.see(6, 0.05, frames=15, find=True)
         if m is None:
             self.mv.dk.rotate_to(h)
             return None
         p, M = self._marker_odom(m)
+        self.M6 = M
         u = np.array([math.cos(h), math.sin(h)])
         along = float((M - np.array(p[:2])) @ u)
         self.mv.dk.rotate_to(h)
@@ -337,11 +349,12 @@ class Entrance(Steps):
     def dock(self):
         rec = _load('~/align_d1s.json')
         h, ws = self.wall_heading('N1')
-        self.go(rec['n1_dist'] + 0.30, '오른쪽', rec.get('w_west'), 'N1 -> 교점 (가운데)',
-                appear_side='왼쪽', after=rec['n1_dist'])
+        self.go(rec['n1_dist'] + ENTRY_EXTRA + 0.30, '오른쪽', rec.get('w_west'), 'N1 -> 교점 (가운데)',
+                appear_side='왼쪽', after=rec['n1_dist'] + ENTRY_EXTRA)
         h = self.mv.dk.pose()[2]
+        self.M6 = None
         for k in range(1, 4):                         # 남북: 마커 6 거리 = 기록
-            a6 = self.along6(h, f'교점 {k}')
+            a6 = self.along6(h, f'교점 {k}', self.M6)
             if a6 is None:
                 break
             e = a6 - rec['along6']
@@ -359,43 +372,45 @@ class Entrance(Steps):
         return 'D1 도킹 끝'
 
     def undock(self, spin_deg=0.0):
-        """D1(서쪽을 봄) -> 마커 1 거리로 곧게 앞으로 교점(통로 가운데) -> [spin_deg 있으면 우로 spin_deg + 90 이어서 돌아
-        북쪽으로 끝 (AMCL 맞춤) / 없으면 우90] -> 통로 벽과 평행 북쪽 (그다음 Nav2 안내)
-        v2 (빠르게, 실측 32초 -> 약 18초): 교점에서 벽 수직 다시 맞추기 · 마커 1 남북 재기(+-10 · 20° 찾기) · 회전 전 벽 평행을 뺌.
-          D1에서 곧게 나오니 남북은 거의 안 바뀜 (실측 +0.4 / -0.2 cm) -> 앞으로 갈 때 잰 마커 1 옆(tx)으로 확인만,
-          1 cm 넘게 틀어졌을 때만 옛 방식으로 고침. 방향은 회전 뒤 벽 평행 한 번으로 맞춤"""
+        """D1(서쪽을 봄) -> 마커 1 거리만 재며 곧게 앞으로 교점(돌 수 있는 곳) -> 우90 (spin_deg 있으면 우로 spin_deg + 90)
+        -> 그대로 Nav2. v3: 벽 수직 · 옆 확인/보정 · 회전 뒤 벽 평행을 모두 뺌 (D1 주차가 이미 벽에 맞춰져 있음, 옆은 redock에서)"""
         rec = _load('~/align_d1s.json')
         t0 = time.time()
-        h_w = self.front_square('D1 벽 수직')
+        h_w = self.mv.dk.pose()[2]
         m = self.back_to(rec['line_tz'], h_w, '교점으로 전진')
-        lat = (m['tx'] - rec.get('line_tx', m['tx'])) if m is not None else 0.0
-        self.log(f'[교점] 마커 1 옆 기록과 {lat * 1000:+.0f} mm')
-        if abs(lat) > 0.01:                               # 드문 경우만: 옛 방식으로 남북 맞춤
-            h_s = md.wrap(h_w + math.pi / 2)
-            for k in range(1, 4):
-                mm = self.see_near(1, h_w)
-                if mm is None:
-                    raise RuntimeError('교점에서 마커 1이 안 보임')
-                e = self.side_of(mm, h_w) - rec.get('line_side', 0.0)
-                self.log(f'[교점 {k}] 마커 1 {mm["tz"] * 100:.1f} cm, 기록과 통로 방향 {e * 100:+.1f} cm')
-                if abs(e) < 0.004:
-                    break
-                self.mv.dk.rotate_to(h_s)
-                self.mv.move_along(e, h_s)
-                self.mv.dk.rotate_to(h_w)
+        if m is not None:
+            self.log(f'[교점] 마커 1 옆 기록과 {(m["tx"] - rec.get("line_tx", m["tx"])) * 1000:+.0f} mm (확인만)')
         h_n = md.wrap(h_w - math.pi / 2)                  # 북쪽 = 서쪽에서 우90
         if spin_deg > 0:
-            self.spin_here(spin_deg + 90.0, h_n, direction=-1)   # 우로 450°: 우90 + 한 바퀴를 멈추지 않고
+            self.spin_here(spin_deg + 90.0, h_n, direction=-1)
         else:
             self.turn(-90.0, '교점 우90 (북쪽)')
-        self.wall_heading('북쪽 (통로 벽)')
         self.log(f'[D1 빠지기] {time.time() - t0:.1f}초')
-        return '교점에서 북쪽을 봄 (여기서 Nav2 안내)' + (f', {spin_deg:.0f}° 회전 (AMCL)' if spin_deg > 0 else '')
+        return '교점에서 북쪽을 봄 (여기서 Nav2)' + (f', {spin_deg:.0f}° 회전 (AMCL)' if spin_deg > 0 else '')
+
+    def lat_fix(self, rec, h_w, tag):
+        """서쪽(h_w)을 본 채 마커 1 옆(통로 남북)을 기록(line_side)에 맞춤: 남쪽으로 돌아 옮기고 다시 h_w"""
+        h_s = md.wrap(h_w + math.pi / 2)
+        for k in range(1, 4):
+            mm = self.see_near(1, h_w)
+            if mm is None:
+                self.log(f'[{tag}] 마커 1이 안 보임 -> 옆 맞춤 건너뜀')
+                return
+            e = self.side_of(mm, h_w) - rec.get('line_side', 0.0)
+            self.log(f'[{tag} {k}] 마커 1 {mm["tz"] * 100:.1f} cm, 기록과 옆(남북) {e * 1000:+.0f} mm')
+            if abs(e) < 0.004:
+                return
+            self.mv.dk.rotate_to(h_s)
+            self.mv.move_along(e, h_s)
+            self.mv.dk.rotate_to(h_w)
 
     def redock(self):
-        """위치 맞추기(LOCALIZE) 뒤: D1 앞(서쪽을 봄)에서 앞 벽 수직 -> 마커 1 거리 = D1 기록까지 곧게 후진"""
+        """위치 맞추기(LOCALIZE) 뒤: D1 앞(서쪽을 봄)에서 앞 벽 수직 -> 옆(남북)을 기록에 맞춤 -> 마커 1 거리 = D1 기록까지 곧게 후진
+        (옆을 안 맞추고 들어가면 19 mm 비껴 주차 -> 다음 빠지기가 느려짐)"""
         rec = _load('~/align_d1s.json')
         h_w = self.front_square('다시 주차 벽 수직')
+        self.lat_fix(rec, h_w, '다시 주차 옆')
+        h_w = self.front_square('다시 주차 벽 수직 (옆 맞춘 뒤)')
         m = self.back_to(rec['d1_tz'], h_w, 'D1로 후진')
         if m is not None:
             self.log(f'[D1 다시 주차] 기록과: 앞뒤 {(m["tz"] - rec["d1_tz"]) * 1000:+.0f} mm, '
