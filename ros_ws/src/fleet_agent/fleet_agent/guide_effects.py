@@ -132,6 +132,16 @@ _led_lock = threading.Lock()
 _PLAY_LOCK = threading.Lock()      # 환영 · 도착 효과 · leds_off가 겹쳐 LED를 서로 켜고 끄지 않게 한 번에 하나 (팀 main _LOCK)
 _led_stop = threading.Event()      # 지금 돌고 있는 무지개 LED를 멈추는 신호
 _led_thread = None
+_HW = {}                           # LCD · LED · 부저는 프로세스에서 한 번만 만들어 계속 씀
+_HW_LOCK = threading.Lock()        #   (LED(ws2811)는 두 번 만들면 'Device or resource busy'로 실패)
+
+
+def _hw(name, cls):
+    """장치 객체 하나를 처음 부를 때 만들고 그다음부터는 그대로 돌려줌 (만들다 실패하면 다음에 다시 시도)"""
+    with _HW_LOCK:
+        if name not in _HW:
+            _HW[name] = cls()
+        return _HW[name]
 
 
 def _stop_rainbow():
@@ -163,21 +173,15 @@ def _led_off(led, log=print):
             break
 
 
-def _hold_then_off(led, buzzer, hold, stop, log):
-    """소리 뒤: 마지막 색 그대로 hold 초 -> LED 끔 -> 그다음에야 부저 정리(clean)
-    (clean이 GPIO를 정리하면 그 뒤 LED · LCD 명령이 안 먹으므로 반드시 맨 마지막)"""
+def _hold_then_off(led, hold, stop, log):
+    """소리 뒤: 마지막 색 그대로 hold 초 -> LED 끔.
+    부저 · LED 객체는 다음 효과에서 다시 쓰므로 정리(GPIO 해제)하지 않는다"""
     try:
         if not stop.wait(hold):
             _led_off(led, log)
             log('LED 꺼짐')
     except Exception as e:  # noqa: BLE001
         log(f'LED 끄기 실패: {e}')
-    finally:
-        if not stop.is_set():          # 새 효과가 이미 시작했으면 GPIO를 건드리지 않음
-            try:
-                buzzer.clean()
-            except Exception as e:  # noqa: BLE001
-                log(f'부저 정리 실패: {e}')
 
 
 def leds_off(log=print):
@@ -191,7 +195,7 @@ def leds_off(log=print):
     with _PLAY_LOCK:
         _stop_rainbow()              # 그사이 효과가 끝나며 새로 띄운 유지 스레드도
         try:
-            _led_off(LED(), log)
+            _led_off(_hw('led', LED), log)
         except Exception as e:  # noqa: BLE001
             log(f'LED 끄기 실패: {e}')
 
@@ -231,11 +235,11 @@ def _play_locked(kind, log, hold, LED, Buzzer, LCD):
     try:
         notes = MELODY.get(kind, MELODY['welcome'])
         imgs = {k: face(kind, k) for k in set(f for f in frames_for(kind) if f is not None)}   # 미리 그려 둠
-        lcd = LCD()
+        lcd = _hw('lcd', LCD)
         lcd.set_backlight(255)
         lcd.img_show(imgs.get(0) or face(kind, 0))
-        led = LED()
-        b = Buzzer()
+        led = _hw('led', LED)
+        b = _hw('buzzer', Buzzer)
         b.buzzer_start()
         total = sum(sec + NOTE_GAP for _, sec in notes)       # 소리 전체 길이 -> 무지개 2바퀴를 여기에 고르게
         start = time.monotonic()
@@ -269,13 +273,13 @@ def _play_locked(kind, log, hold, LED, Buzzer, LCD):
             t_note += NOTE_GAP                                # 음 사이 살짝 끊어서 또렷하게
             led_until(t_note)
         b.set_buzzer_duty(0)
-        b.buzzer_stop()                                       # 소리만 멈춤. clean(GPIO 정리)은 LED 끈 뒤 맨 마지막
+        b.buzzer_stop()                                       # 소리만 멈춤 (객체는 다음 효과에서 다시 씀)
         if LCD_BLACK:
             _lcd_black(lcd)                                   # 소리 끝 = 얼굴 지우고 검은 화면 (정리 전에)
         led.fill(RAINBOW[-1])                                 # 2바퀴 끝 = 보라 (마지막 색 그대로 둠)
         led.show()
         stop = threading.Event()
-        t = threading.Thread(target=_hold_then_off, args=(led, b, hold, stop, log), daemon=True)
+        t = threading.Thread(target=_hold_then_off, args=(led, hold, stop, log), daemon=True)
         with _led_lock:
             globals()['_led_stop'] = stop
             _led_thread = t
