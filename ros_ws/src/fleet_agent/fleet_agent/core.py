@@ -576,6 +576,7 @@ class Driver:
                 self.prec_state = ''
                 self.prec_done_node = self.cur.node_id   # 입구 도킹까지 끝 = D1 도착 (돌지 않음)
                 self.entrance_req = None
+                self._mark_leave(self.cur.node_id)       # 도킹 중 APPEND로 지나가는 노드가 돼도 나올 때 빠지기
                 self._reached(pose)
         elif self.phase == 'table_approach':
             if self.prec_state == 'ok':
@@ -603,6 +604,7 @@ class Driver:
                 then_done = self.prec_info.get('then_done', bool(req.get('then')) and idx == len(steps) - 1)
                 if then_done and not (req.get('then') or {}).get('pass_through'):
                     self.prec_done_node = self.cur.node_id   # tape / dock_in을 이미 함 (지나가기면 안 침)
+                    self._mark_leave(self.cur.node_id)       # 들어간 뒤 APPEND로 지나가는 노드가 돼도 나올 때 빠지기
                 self._reached(pose)
         elif self.phase == 'localize':
             self._tick_localize(pose)
@@ -839,6 +841,12 @@ class Driver:
             self._request_precision(False)
             return
         self._done()
+
+    def _mark_leave(self, node):
+        """정밀 정차로 노드 안에 들어감 -> 나올 때 leave(언도킹 · 테이프 빼기)를 하도록 기억.
+        _done()은 도착지일 때만 잡으므로, 정차 중 APPEND로 도착지가 바뀌어 지나가는 노드가 된 경우를 여기서 잡는다"""
+        if self.stops.get(node, {}).get('leave'):
+            self.leave_from = node
 
     def _at_goal(self, step):
         """이 노드가 이번 이동의 도착지인가 (Move.goal_node). 모르면(예전 서버) 줄 끝(뒤에 남은 노드 없음)이면 도착지"""

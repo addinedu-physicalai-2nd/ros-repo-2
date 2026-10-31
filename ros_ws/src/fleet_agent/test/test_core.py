@@ -870,6 +870,28 @@ def test_entrance_d1_exit_then_greet_then_nav():
 
 
 
+def test_entrance_d1_append_while_docking_then_exit():
+    # D1로 복귀해 입구 도킹 중 서버가 같은 cmd에 APPEND (도착지 P1): D1은 지나가는 노드 -> 다음 N1 전에 entrance_exit
+    r, d = make(*N2, math.pi, last_drive=FORWARD)
+    d.stops = ENT_STOPS
+    r.prec_delay = 40
+    d.on_move(92, False, FORWARD, [('N1',) + N1 + (math.pi,)], False, 'D1')
+    d.on_move(92, True, REVERSE, [('D1',) + D1 + (0.069,)], False, 'D1')
+    sent = {'done': False}
+
+    def hook(t):
+        if not sent['done'] and r.prec == ['D1:entrance'] and r.prec_pending:
+            sent['done'] = True
+            d.on_move(92, True, FORWARD, [('N1',) + N1 + (math.pi,)], False, 'P1')
+            r.prec_delay = 0
+
+    run(r, d, 40, hook=hook)
+    assert r.prec[:2] == ['D1:entrance', 'D1:entrance_exit']
+    ev = [(t, n) for t, n, _ in r.events]
+    assert (DOCKED, 'D1') not in ev and (UNDOCKED, 'D1') in ev
+    assert reached(r) == ['N1', 'D1', 'N1']
+
+
 def test_localize_fwd_spin_back_then_event():
     # Control LOCALIZE: 앞으로 0.15 m -> 360° -> 처음 방향 -> 뒤로 0.15 m (원래 자리) -> LOCALIZED
     r, d = make(1.0, 1.0, 0.0)
