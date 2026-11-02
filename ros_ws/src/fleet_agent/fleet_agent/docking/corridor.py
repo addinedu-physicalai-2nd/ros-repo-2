@@ -200,6 +200,30 @@ class Steps:
         p = self.mv.dk.pose()
         return p, np.array(p[:2]) + md.rot(p[2]) @ np.array([md.CAM_X_M + m['tz'], -m['tx']])
 
+    def wall_phi(self, tag, secs=1.0):
+        """앞 벽(도크 마커가 붙은 벽)을 라이다로 직선 맞춤 -> 벽 법선 phi (odom, 벽 -> 로봇 쪽). 안 보이면 None
+        2.5 cm 마커 기울기는 15~20 cm에서도 몇 °씩 튀고 부호까지 뒤집혀서 (D3 실측 -4.1° -> +5.7° -> -9.0°)
+        줄 방향은 벽으로 잡는다 (D1과 같은 방식). 멈춘 채 secs초 동안 잰 값의 평균"""
+        if self.lidar is None:
+            return None
+        import time
+        from .entrance import front_wall
+        acc, t_end = [], time.time() + secs
+        while time.time() < t_end:
+            pts = self.lidar.take()
+            if pts is not None:
+                r = front_wall(pts)
+                if r is not None:
+                    acc.append(md.wrap(self.mv.dk.pose()[2] - r[1] + math.pi))
+            time.sleep(0.03)
+        if len(acc) < 3:
+            self.log(f'[{tag}] 앞 벽이 라이다에 안 잡힘 -> 마커 기울기로')
+            return None
+        phi = math.atan2(float(np.mean(np.sin(acc))), float(np.mean(np.cos(acc))))
+        off = md.wrap(self.mv.dk.pose()[2] - md.wrap(phi + math.pi))
+        self.log(f'[{tag}] 라이다 앞 벽: 로봇이 벽 수직에서 {math.degrees(off):+.1f}° ({len(acc)}번 잼)')
+        return phi
+
     @staticmethod
     def _rel(p, goal, phi):
         """목표 기준 로봇: (옆 m, 덜 들어간 거리 m (+면 벽에서 더 멀어져야), 방향 rad)"""
@@ -297,6 +321,8 @@ class Steps:
         - 줄에서 옆으로 벗어난 만큼만 아주 살짝 기움 (최대 PARK_STEER_DEG, 회전 속도 PARK_W_MAX 제한) -> 크게 안 틈
         - 끝: 멈춰서 정답 자세와 비교, 앞뒤 · 방향 마무리"""
         import time
+        if phi is None:                               # D2 · D3: 줄 방향은 라이다 앞 벽 (안 보이면 예전처럼 마커 기울기)
+            phi = self.wall_phi(f'{name} 벽 방향')
         D, phi = self.match(marker, stop_rec, f'{name} 맞추기', phi_fixed=phi)
         g = target_rec
         size = g.get('size', 0.025)
@@ -484,7 +510,13 @@ class Steps:
         p1 = self.mv.dk.pose()
         s_out = (p1[0] - p0[0]) * math.cos(h) + (p1[1] - p0[1]) * math.sin(h)
         m = self.see(marker, 0.025, frames=30)
-        g = md.goal_from_record(m)
+        phi = self.wall_phi('기록 벽 방향')        # 주차 때와 같은 기준 (라이다 앞 벽). 안 보이면 마커 기울기
+        if phi is not None:
+            p, D = self._marker_odom(m)
+            rel = md.rot(-phi) @ (np.array(p[:2]) - D)
+            g = {'gx': float(rel[0]), 'gy': float(rel[1]), 'gth': md.wrap(p[2] - phi)}
+        else:
+            g = md.goal_from_record(m)
         g.update(fx=md.FX, size=0.025)
         _save(f'~/dock_target_{cfg["stop"]}.json', g)
         gd = dict(g)
