@@ -35,6 +35,7 @@ fleet_agent <-> docking 인터페이스 (std_msgs/String, JSON)
 - 일하는 동안만 /cmd_vel을 쓴다 (fleet_agent는 그동안 멈춰 있음)
 """
 import json
+import math
 import threading
 import time
 
@@ -225,6 +226,8 @@ class DockingNode(Node):
     def docker(self, marker_id, tag):
         md.load_cam_file()
         md.open_log(tag)
+        if md.CAM_DY or md.CAM_DYAW:
+            md.log(f'[카메라 오프셋] 옆 {md.CAM_DY * 1000:+.1f} mm, 각도 {math.degrees(md.CAM_DYAW):+.2f}° 보정 (기준 로봇 대비)')
         if self.cam is None:
             self.cam = md.Camera(marker_id, self, spin=False)  # camera_node 영상 구독 (카메라를 쥐지 않음)
         self.cam.id = marker_id

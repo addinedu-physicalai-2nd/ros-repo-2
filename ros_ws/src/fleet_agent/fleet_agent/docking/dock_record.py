@@ -70,6 +70,8 @@ def main():
 
     md.load_cam_file()
     md.open_log(f'record_{args.cmd}')
+    if md.CAM_DY or md.CAM_DYAW:   # 이 로봇 카메라 오프셋을 빼고 기준 로봇(pinky1) 값으로 기록
+        md.log(f'[카메라 오프셋] 옆 {md.CAM_DY * 1000:+.1f} mm, 각도 {math.degrees(md.CAM_DYAW):+.2f}° 보정해서 기록')
     rclpy.init(signal_handler_options=SignalHandlerOptions.NO)
     node = rclpy.create_node('dock_record')
     pub = node.create_publisher(Twist, '/cmd_vel', 10)

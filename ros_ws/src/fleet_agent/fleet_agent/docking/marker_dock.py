@@ -128,12 +128,38 @@ def set_fx(fx):
 set_fx(FX_DEFAULT)
 
 
+# 카메라 오프셋: 기준 로봇(pinky1) 카메라 대비 이 로봇 카메라가 옆(dy, m, + 왼쪽) · 각도(dyaw, + 반시계)로
+# 틀어져 달린 양. records/cam/<hostname>.json 의 dy · dyaw_deg (없으면 0). Camera.measure가 측정값을
+# "기준 로봇 카메라였다면 나왔을 값"으로 바꿔서 돌려준다 -> 기록(어느 로봇으로 찍든) · 주차가 같은 기준
+CAM_DY = 0.0
+CAM_DYAW = 0.0
+
+
 def load_cam_file():
-    """(v4.3) 카메라 보정 FX 읽기 (records.cam_file: 레포 cam/<hostname>.json -> ~/dock_cam.json). 없으면 기본값"""
+    """(v4.3) 카메라 보정 FX (+ v4.4 오프셋 dy · dyaw_deg) 읽기 (records.cam_file: 레포 cam/<hostname>.json
+    -> ~/dock_cam.json). 없으면 기본값 · 오프셋 0"""
+    global CAM_DY, CAM_DYAW
+    CAM_DY, CAM_DYAW = 0.0, 0.0
     path = records.cam_file()
     if os.path.exists(path):
         with open(path) as f:
-            set_fx(json.load(f)['fx'])
+            j = json.load(f)
+        set_fx(j['fx'])
+        CAM_DY = float(j.get('dy', 0.0))
+        CAM_DYAW = math.radians(float(j.get('dyaw_deg', 0.0)))
+
+
+def cam_correct(m, dy, dyaw):
+    """이 로봇 카메라 측정 -> 기준 로봇 카메라였으면 나왔을 값 (table_align.cam_correct와 같음).
+    카메라 좌표 (앞 z, 왼쪽 y = -tx)를 dyaw만큼 돌리고 옆으로 dy, 마커 각도도 dyaw만큼"""
+    if not m or (dy == 0.0 and dyaw == 0.0):
+        return m
+    z, y = m['tz'], -m['tx']
+    c, s = math.cos(dyaw), math.sin(dyaw)
+    out = dict(m)
+    out['tz'], out['tx'] = c * z - s * y, -(s * z + c * y + dy)
+    out['yaw'] = wrap(m['yaw'] + dyaw)
+    return out
 
 
 def target_file_of(marker_id):
@@ -306,7 +332,9 @@ class Camera:
             else:
                 self._new.wait(min(0.05, left))
 
-    def measure(self):
+    def measure(self, raw=False):
+        """마커 측정. 기본은 카메라 오프셋 보정한 값 (기준 로봇 기준). raw=True면 보정 안 한 카메라 값
+        (fx 보정 --calibrate · 카메라 오프셋 재는 도구는 raw를 써야 함. 보정된 값으로 오프셋을 재면 남은 차이만 잼)"""
         frame = self.capture()
         self.last_frame = frame
         corners, ids, _ = self.det.detectMarkers(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY))
@@ -318,13 +346,13 @@ class Camera:
                 if m:
                     self.last_frame = frame.copy()
                     cv2.aruco.drawDetectedMarkers(self.last_frame, [c], np.array([[i]]))
-                return m
+                return m if raw else cam_correct(m, CAM_DY, CAM_DYAW)
         return None
 
-    def measure_stable(self, frames=MEASURE_FRAMES, timeout=4.0):
+    def measure_stable(self, frames=MEASURE_FRAMES, timeout=4.0, raw=False):
         got, t0 = [], time.time()
         while len(got) < frames and time.time() - t0 < timeout:
-            m = self.measure()
+            m = self.measure(raw=raw)
             if m:
                 got.append(m)
         if len(got) < frames // 2:
@@ -510,13 +538,13 @@ class Docker:
     def calibrate(self):
         """카메라 거리 보정 -> 결과 문구"""
         self.stop(0.3)
-        m1 = self.cam.measure_stable()
+        m1 = self.cam.measure_stable(raw=True)     # fx는 카메라 그대로의 값으로 (오프셋 보정 전)
         if m1 is None:
             return '실패: 마커가 안 보임'
         p1 = self.pose()
         self.drive_to(p1[0] + 0.10 * math.cos(p1[2]), p1[1] + 0.10 * math.sin(p1[2]))
         self.stop(0.4)
-        m2 = self.cam.measure_stable()
+        m2 = self.cam.measure_stable(raw=True)
         p2 = self.pose()
         if m2 is None:
             return '실패: 이동 후 마커가 안 보임 (더 멀리서 시작)'

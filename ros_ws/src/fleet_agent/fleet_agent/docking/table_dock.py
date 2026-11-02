@@ -22,6 +22,8 @@ table_exit (leave)
 카메라 오프셋: records/cam/<hostname>.json 의 dy (m, + 왼쪽), dyaw_deg (+ 반시계) = 기준 로봇(pinky1) 대비
   카메라가 옆 · 각도로 틀어져 달린 양 (table_align.py --cam-offset 으로 잼). 측정값을 기준 로봇 카메라 값으로 바꿔서
   기록(pinky1로 찍음)을 다른 로봇도 그대로 씀. 없으면 0 (보정 안 함)
+  보정은 marker_dock.Camera.measure에서 함 (도킹 · 테이블 공통, md.load_cam_file이 읽음). 오프셋을 재는 도구는
+  Camera.measure(raw=True) / measure_stable(raw=True)로 보정 전 값을 써야 한다
 
 기록 파일: 팀 marker_dock과 같은 형식 {gx, gy, gth, fx, size} (도크 좌표계: 원점 = 마커, x = 법선)
   table_align.py --record-lane 으로 만든다 (차선 위 한 점 + 방향. gx 쪽 앞뒤 위치는 의미 없음)
@@ -73,17 +75,8 @@ def load_cam_offset():
         return 0.0, 0.0
 
 
-def cam_correct(m, dy, dyaw):
-    """이 로봇 카메라 측정 -> 기준 로봇 카메라였으면 나왔을 값 (table_align.cam_correct와 같음).
-    카메라 좌표 (앞 z, 왼쪽 y = -tx)를 dyaw만큼 돌리고 옆으로 dy, 마커 각도도 dyaw만큼"""
-    if dy == 0.0 and dyaw == 0.0:
-        return m
-    z, y = m['tz'], -m['tx']
-    c, s = math.cos(dyaw), math.sin(dyaw)
-    out = dict(m)
-    out['tz'], out['tx'] = c * z - s * y, -(s * z + c * y + dy)
-    out['yaw'] = md.wrap(m['yaw'] + dyaw)
-    return out
+# 보정 함수는 marker_dock으로 옮김 (Camera.measure가 도킹 · 테이블 모두 한 번에 보정). 이름은 예전 import용으로 남김
+cam_correct = md.cam_correct
 
 
 def lane_offset(pose, goal):
@@ -222,7 +215,7 @@ class TableDocker:
         self.cam.snapshot(tag)
         if m is None:
             return None
-        m = cam_correct(m, *self.cam_off)       # 로봇별 카메라 오프셋 (기준 로봇 값으로)
+        # 로봇별 카메라 오프셋은 Camera.measure가 이미 보정함 (여기서 또 빼면 두 번 빠짐)
         p = dk.wait_pose()
         D, phi = md.dock_in_odom(m, p)
         spread = math.degrees(m['yaw_spread'])

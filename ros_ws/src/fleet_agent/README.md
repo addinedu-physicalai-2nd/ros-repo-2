@@ -142,6 +142,10 @@ ros2 run fleet_agent dock_record dock --dock d2  # D2 칸에 손으로: d2 · n1
 ros2 run fleet_agent dock_record check           # 확인 (n15와 d3 차이 0이어야 함, --dock d2도)
 ros2 run fleet_agent dock_record scan            # (필요하면) 지금 자리에서 라이다로 양옆 벽이 보이나
 ```
+카메라 오프셋: `records/cam/<hostname>.json`의 `dy`(m, + 왼쪽) · `dyaw_deg`(+ 반시계) = 기준 로봇(pinky1) 카메라 대비
+이 로봇 카메라가 틀어져 달린 양. `marker_dock.Camera.measure`가 모든 마커 측정(도킹 · 빠지기 · N14 · 기록 · 테이블)을
+기준 로봇 값으로 바꿔 준다 -> 기록은 어느 로봇으로 찍어도 같고, 세 로봇이 같은 기록으로 같은 자리에 선다.
+로그 `[카메라 오프셋] 옆 ... 각도 ...° 보정`. 오프셋을 재는 도구 · `--calibrate`는 `measure(raw=True)`(보정 전 값)를 쓴다.
 기록 파일은 레포 `ros_ws/src/fleet_agent/records/`에 저장되고 모든 로봇이 거기서 읽는다 (`records/README.md`, 형식: `fleet_msgs/docs/record_json_format.md`).
 다시 찍으면 `git status`에 바뀐 json이 보이니 커밋 · push. 마커를 다시 붙이거나 벽을 옮기면 다시 기록한다.
 
