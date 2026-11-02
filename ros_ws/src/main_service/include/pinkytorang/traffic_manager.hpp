@@ -63,6 +63,9 @@ class TrafficManager {
   void clearGoal(const std::string& id);
   bool isStationary(const std::string& id) const;  // 보낸 노드도 없고 목적지도 없음
   std::string goalOf(const std::string& id) const;  // 목적지 ("" = 없음)
+  std::vector<std::string> committedOf(const std::string& id) const;  // 보냈고 잠근 노드 (관제 화면)
+  std::vector<std::string> planOf(const std::string& id) const;       // 그 뒤 예정 노드 (관제 화면)
+  std::string waitingFor(const std::string& id) const;                // 막혀서 기다리는 상대 ("" = 없음)
 
   // ---- 로봇 이벤트
   void onNodeReached(const std::string& id, const std::string& node);

@@ -433,6 +433,13 @@ void ClientLinkManager::pushSnapshot(const SnapshotView& snap) {
     else o["task_id"] = nullptr;
     o["online"] = r.online;
     o["charging"] = r.charging;
+    wvalue::list committed;  // 관제 화면: 잠근 길 (진한 선)
+    for (const std::string& n : r.committed) committed.push_back(n);
+    o["committed"] = std::move(committed);
+    wvalue::list plan;       // 관제 화면: 예정 길 (점선)
+    for (const std::string& n : r.plan) plan.push_back(n);
+    o["plan"] = std::move(plan);
+    o["waiting_for"] = r.waiting_for;
     robots.push_back(std::move(o));
   }
   j["robots"] = std::move(robots);

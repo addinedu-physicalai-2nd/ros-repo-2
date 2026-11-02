@@ -108,6 +108,9 @@ struct RobotView {
   int task_id = -1;       // -1 = 없음
   bool online = false;
   bool charging = false;  // 배터리 부족으로 충전 중 (배정 안 함)
+  std::vector<std::string> committed;  // 보냈고 잠근 노드 (아직 도착 전, 앞에서부터) - 관제 화면
+  std::vector<std::string> plan;       // 그 뒤로 목적지까지 예정된 노드 (아직 안 보냄)
+  std::string waiting_for;             // 다음 칸을 못 잡고 기다리는 상대 로봇 ("" = 안 기다림)
 };
 
 struct TableView {

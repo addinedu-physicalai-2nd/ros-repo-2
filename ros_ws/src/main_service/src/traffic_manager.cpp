@@ -158,6 +158,24 @@ std::string TrafficManager::goalOf(const std::string& id) const {
   return it->second.goal;
 }
 
+std::vector<std::string> TrafficManager::committedOf(const std::string& id) const {
+  auto it = robots_.find(id);
+  if (it == robots_.end()) return {};
+  return it->second.committed;
+}
+
+std::vector<std::string> TrafficManager::planOf(const std::string& id) const {
+  auto it = robots_.find(id);
+  if (it == robots_.end() || it->second.goal.empty()) return {};
+  return it->second.plan;
+}
+
+std::string TrafficManager::waitingFor(const std::string& id) const {
+  auto it = robots_.find(id);
+  if (it == robots_.end() || !it->second.waiting) return "";
+  return it->second.waiting_for;
+}
+
 void TrafficManager::checkArrival(Robot& r) {
   if (r.goal.empty() || !r.committed.empty() || r.cmd_active) return;
   if (r.at != r.goal) return;

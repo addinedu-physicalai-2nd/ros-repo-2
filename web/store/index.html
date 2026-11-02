@@ -12,6 +12,10 @@
     <div class="bar-left">
       <div class="brand"><span class="brand-mark"></span>핑키토랑</div>
       <span class="bar-sub">매장관리</span>
+      <nav class="tabs" role="tablist">
+        <button class="tab on" data-tab="ops" role="tab">운영</button>
+        <button class="tab" data-tab="ctl" role="tab">관제</button>
+      </nav>
     </div>
     <div class="bar-right">
       <span id="clock" class="clock num"></span>
@@ -23,7 +27,7 @@
 
   <div id="alerts" class="alerts"></div>
 
-  <div class="layout">
+  <div class="layout" id="opsView">
     <main class="main">
       <section>
         <div class="sec-head"><h2>확인 필요</h2><span id="confirmCount" class="count num"></span></div>
@@ -58,6 +62,33 @@
     <aside class="side">
       <div class="sec-head"><h2>로봇</h2></div>
       <div id="robots" class="robots"></div>
+    </aside>
+  </div>
+
+  <!-- 관제: 노드 격자 위에 로봇별 잠근 길(진한 선) · 예정 길(점선) · 잠근 노드 · 위치 -->
+  <div class="ctl" id="ctlView" hidden>
+    <section class="ctl-map-card">
+      <div class="sec-head">
+        <h2>관제 맵</h2>
+        <span id="ctlInfo" class="count"></span>
+      </div>
+      <svg id="ctlMap" class="ctl-map" xmlns="http://www.w3.org/2000/svg">
+        <g id="ctlStatic"></g>
+        <g id="ctlPaths"></g>
+        <g id="ctlDyn"></g>
+        <g id="ctlBots"></g>
+      </svg>
+      <div class="ctl-legend">
+        <span><i class="lg solid"></i>잠근 길 (점유)</span>
+        <span><i class="lg dash"></i>예정 길</span>
+        <span><i class="lg ring"></i>잠근 노드</span>
+        <span><i class="lg goal"></i>목적지</span>
+        <span><i class="lg obst"></i>장애물</span>
+      </div>
+    </section>
+    <aside class="ctl-side">
+      <div class="sec-head"><h2>로봇 경로</h2></div>
+      <div id="ctlRobots" class="ctl-robots"></div>
     </aside>
   </div>
 

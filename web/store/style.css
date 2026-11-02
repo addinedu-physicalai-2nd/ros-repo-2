@@ -129,4 +129,104 @@ th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--li
 th { position: sticky; top: 0; background: var(--surface-2); color: var(--muted); font-weight: 600; }
 td:first-child { white-space: nowrap; color: var(--muted); }
 
+/* 탭 (운영 / 관제) */
+.tabs { display: flex; gap: 4px; margin-left: 12px; padding: 3px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px; }
+.tab { height: 30px; padding: 0 14px; border-radius: 7px; font-size: 13px; font-weight: 600; color: var(--muted); }
+.tab.on { background: var(--surface); color: var(--text); box-shadow: 0 1px 2px rgba(0, 0, 0, .08); }
+
+/* 관제 */
+.ctl { display: grid; grid-template-columns: 1fr 340px; gap: 24px; padding: 24px 28px 40px; }
+.ctl-map-card { background: var(--surface); border-radius: var(--radius); box-shadow: var(--shadow); padding: 16px 18px 14px; min-width: 0; }
+.ctl-map { display: block; width: 100%; height: calc(100vh - 230px); min-height: 520px; }
+.ctl-legend { display: flex; flex-wrap: wrap; gap: 18px; margin-top: 10px; font-size: 12px; color: var(--muted); }
+.ctl-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.lg { display: inline-block; width: 22px; height: 0; }
+.lg.solid { border-top: 4px solid var(--text); border-radius: 2px; }
+.lg.dash { border-top: 2px dashed var(--text); }
+.lg.ring { width: 12px; height: 12px; border: 3px solid var(--text); border-radius: 4px; }
+.lg.goal { width: 10px; height: 10px; border: 2px solid var(--text); transform: rotate(45deg); }
+.lg.obst { width: 12px; height: 12px; background: var(--err); border-radius: 50%; }
+
+.ctl-robots { display: flex; flex-direction: column; gap: 10px; }
+.ctl-robot { background: var(--surface); border-radius: var(--radius); padding: 12px 14px; box-shadow: var(--shadow); border-left: 4px solid var(--rc); }
+.ctl-robot.offline { opacity: .55; }
+.ctl-robot .robot-head { margin-bottom: 8px; }
+.route { display: flex; flex-wrap: wrap; align-items: center; gap: 3px; font-size: 12px; }
+.route b { font-weight: 700; }
+.route .n { padding: 1px 6px; border-radius: 5px; background: var(--surface-2); border: 1px solid var(--line); font-variant-numeric: tabular-nums; }
+.route .n.at { background: var(--text); color: #fff; border-color: var(--text); }
+.route .n.lock { background: var(--rc); color: #fff; border-color: var(--rc); }
+.route .n.plan { border-style: dashed; color: var(--muted); }
+.route .n.goal { outline: 2px solid var(--rc); outline-offset: 1px; }
+.route .arr { color: var(--faint); }
+.ctl-wait { margin-top: 8px; font-size: 12px; font-weight: 600; color: #7a4f00; background: var(--warn-weak); padding: 4px 8px; border-radius: 6px; }
+
+/* 관제 맵 (SVG) */
+.g-grid { stroke: #f1f1ed; stroke-width: 1; }
+.g-grid.major { stroke: #e4e4de; }
+.g-edge { stroke: #d3d3cc; stroke-width: 4; stroke-linecap: round; }
+.g-oneway { fill: #c4c4bd; }
+.g-node { fill: var(--surface); stroke: #bdbdb6; stroke-width: 1.5; }
+.g-node.DOCK { fill: #fbe9c8; stroke: #e0a63a; }
+.g-node.PICKUP, .g-node.QUEUE { fill: #e6f5ee; stroke: #5fb893; }
+.g-node.SERVE { fill: var(--surface); stroke: #cfcfc8; stroke-dasharray: 3 2; }
+.g-label { font-size: 11px; font-weight: 700; fill: #8a8a90; text-anchor: middle; dominant-baseline: central; pointer-events: none; }
+.g-label.big { font-size: 12px; fill: var(--text); }
+.g-table { fill: #f3f3ef; stroke: #d9d9d2; stroke-width: 1.5; }
+.g-table.OCCUPIED { fill: var(--accent-weak); stroke: #f0a3bf; }
+.g-table.RESERVED { fill: #e8f0fe; stroke: #9bbcf3; }
+.g-zone { font-size: 12px; font-weight: 700; fill: #b07a1a; text-anchor: middle; }
+.g-zone.pick { fill: #2f8a63; }
+.g-lock { fill: none; stroke-width: 4; }
+.g-path { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.g-path.solid { stroke-width: 7; opacity: .9; }
+.g-path.dash { stroke-width: 3; stroke-dasharray: 7 6; opacity: .75; }
+.g-path.flow { animation: flow .9s linear infinite; }                       /* 예정 길: 목적지 쪽으로 흐름 */
+.g-path.run { stroke: #fff; stroke-width: 2.5; stroke-dasharray: 2 14; opacity: .9; animation: run .7s linear infinite; }
+@keyframes flow { to { stroke-dashoffset: -13; } }
+/* 길 옆 >>> : 움직이면 차례로 켜지며 흐름, 서 있으면 흐리게 멈춤 */
+.g-chevs path { fill: none; stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; opacity: .85; }
+.g-chevs.moving path { animation: chev 0.9s ease-in-out infinite; }
+.g-chevs.wait path { opacity: .28; stroke: #9a9aa0; }
+@keyframes chev { 0%, 100% { opacity: .2; } 40% { opacity: 1; } }
+
+@keyframes run { to { stroke-dashoffset: -16; } }
+.g-robot .halo { opacity: 0; transform-box: fill-box; transform-origin: center; }
+.g-robot.moving .halo { animation: robot-halo 1.6s ease-out infinite; }
+@keyframes robot-halo { from { transform: scale(1); opacity: .35; } to { transform: scale(2.2); opacity: 0; } }
+.g-goal { fill: var(--surface); stroke-width: 3; }
+.g-robot circle.body { stroke: #fff; stroke-width: 3; }
+.g-robot text.num-in { font-size: 12px; font-weight: 800; fill: #fff; text-anchor: middle; dominant-baseline: central; }
+.g-robot.off circle.body, .g-robot.off path { fill: #b9b9b4; }
+.g-obst circle.core { fill: var(--err); }
+.g-obst circle.halo { fill: var(--err); opacity: .25; animation: halo 1.4s ease-out infinite; transform-box: fill-box; transform-origin: center; }
+.g-obst path { stroke: #fff; stroke-width: 3; stroke-linecap: round; }
+.g-obst-edge { stroke: var(--err); stroke-width: 6; stroke-linecap: round; opacity: .8; }
+@keyframes halo { from { transform: scale(.6); opacity: .45; } to { transform: scale(1.8); opacity: 0; } }
+
 @keyframes drop { from { transform: translateY(-6px); opacity: 0; } }
+
+/* 서 있는 로봇의 예정 길은 흐르지 않음 */
+.g-path.flow.still { animation: none; }
+
+/* 대기 (다음 칸을 다른 로봇이 씀) */
+.g-robot .pause { display: none; }
+.g-robot.waiting .pause { display: block; }
+.g-robot .pause circle { fill: #f2a516; stroke: #fff; stroke-width: 2; }
+.g-robot .pause rect { fill: #fff; }
+.g-robot.waiting .halo { animation: none; opacity: 0; }
+.g-blocked { fill: none; stroke: #f2a516; stroke-width: 3; stroke-dasharray: 5 4; }
+/* 경로 변경 */
+.g-path.ghost { stroke-width: 4; stroke-dasharray: 2 6; opacity: 0; }
+.g-path.ghost.show { animation: ghost 2.6s ease-out forwards; }
+@keyframes ghost { 0% { opacity: .55; } 100% { opacity: 0; } }
+.g-path.reroute { animation: reroute .5s ease-in-out 4; }
+.g-path.dash.flow.reroute { animation: reroute .5s ease-in-out 4, flow .9s linear infinite; }
+@keyframes reroute { 50% { stroke-width: 9; opacity: 1; } }
+.ctl-reroute { margin-top: 6px; font-size: 12px; font-weight: 600; color: #2557b8; background: #e8f0fe; padding: 4px 8px; border-radius: 6px; }
+.g-obst-label { font-size: 11px; font-weight: 800; fill: var(--err); text-anchor: middle; paint-order: stroke; stroke: #fff; stroke-width: 4px; }
+/* 로봇이 가는 테이블 */
+.g-table-target { fill: none; stroke-width: 3.5; stroke-dasharray: 9 5; animation: tbl-flow 1.2s linear infinite; }
+@keyframes tbl-flow { to { stroke-dashoffset: -14; } }
+.g-table-badge circle { stroke: #fff; stroke-width: 2.5; }
+.g-table-badge text { font-size: 11px; font-weight: 800; fill: #fff; text-anchor: middle; dominant-baseline: central; }
