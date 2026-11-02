@@ -516,13 +516,16 @@ function renderCtlDyn() {
     const p = np(o.node);
     if (!p) return;
     out.push(`<g class="g-obst" transform="translate(${f1(p[0])} ${f1(p[1])})"><circle class="halo" r="16"/><circle class="core" r="11"/>
-      <path d="M-4 -4 L4 4 M4 -4 L-4 4"/>${o.kind ? `<text class="g-obst-label" y="-20">${esc(OBST_TEXT[o.kind] || o.kind)}</text>` : ''}</g>`);
+      <path d="M-4 -4 L4 4 M4 -4 L-4 4"/><text class="g-obst-label" y="-20">${esc(OBST_TEXT[o.kind] || '장애물')}</text></g>`);
   });
   setHtml('ctlDyn', out.join(''));
   updateBots(robots, mid);
   const moving = robots.filter((r) => r.goal_node).length;
+  // 장애물: 서버가 피하는 남은 시간 (block_avoid_sec). 맵 표시는 그대로 두고 남은 초는 여기만 (맵을 매초 다시 그리지 않게)
+  const obstText = state.obstacles.filter((o) => o.node)
+    .map((o) => `${o.node}${o.left_sec > 0 ? ` ${Math.ceil(o.left_sec)}초` : ''}`).join(', ');
   $('ctlInfo').textContent = `로봇 ${robots.length}대 · 이동 ${moving}대 · 잠근 노드 ${state.locks.length}개` +
-    (state.obstacles.length ? ` · 장애물 ${state.obstacles.length}` : '');
+    (obstText ? ` · 장애물 ${obstText}` : '');
 }
 
 function renderCtlSide() {

@@ -220,6 +220,7 @@ void TrafficManager::onNodeReached(const std::string& id, const std::string& nod
     const MapNode* hn = map_.node(r.at);
     r.table_entry = (hn && hn->stop_kind == "SERVE" && prev != r.at) ? prev : "";
     if (r.at == r.reserved_exit) r.reserved_exit = "";
+    obstacle_kind_.erase(r.at);
     if (obstacles_.erase(r.at)) logLine("TRAFFIC", id + " " + r.at + " 지나감 -> 장애물 치워진 것으로 봄");
     if (r.at == node) break;
   }
@@ -294,7 +295,7 @@ void TrafficManager::abandon(const std::string& id) {
 
 // ---------------------------------------------------------------- 장애물 우회 (규칙 9)
 
-bool TrafficManager::reroute(const std::string& id, const std::string& blocked, std::string& info) {
+bool TrafficManager::reroute(const std::string& id, const std::string& blocked, std::string& info, const std::string& kind) {
   auto it = robots_.find(id);
   if (it == robots_.end() || !it->second.localized || it->second.goal.empty()) {
     info = "목적지 없음";
@@ -343,6 +344,7 @@ bool TrafficManager::reroute(const std::string& id, const std::string& blocked, 
   r.cmd_active = false;  // 다음 Move는 REPLACE (로봇이 들고 있는 막힌 길을 버리게)
   // 장애물 기록: 모든 로봇이 block_avoid_sec 동안 피함 (목적지가 바뀌어도). 누가 지나가면 onNodeReached에서 풂
   obstacles_[blocked] = Clock::now() + std::chrono::milliseconds(static_cast<int>(cfg_.block_avoid_sec * 1000));
+  obstacle_kind_[blocked] = kind;
   r.route_start = r.at;
 
   // 로봇은 at과 막힌 노드 사이에 서 있다 -> 먼저 at으로 돌아가게 [at]을 REPLACE로, 새 길은 tryExtend가 APPEND
@@ -741,6 +743,21 @@ void TrafficManager::publish(Robot& r, const std::vector<std::string>& nodes, bo
 }
 
 // ---------------------------------------------------------------- 조회
+
+std::vector<ObstacleView> TrafficManager::obstacles() const {
+  std::vector<ObstacleView> out;
+  Clock::time_point now = Clock::now();
+  for (const auto& ob : obstacles_) {
+    if (now >= ob.second) continue;  // 기한 지남 (baseBan도 안 뺌)
+    ObstacleView v;
+    v.node = ob.first;
+    auto k = obstacle_kind_.find(ob.first);
+    if (k != obstacle_kind_.end()) v.kind = k->second;
+    v.left_sec = std::chrono::duration<double>(ob.second - now).count();
+    out.push_back(v);
+  }
+  return out;
+}
 
 std::vector<LockView> TrafficManager::locks() const {
   std::vector<LockView> out;

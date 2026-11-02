@@ -63,7 +63,7 @@ class TrafficManager {
   // 로봇이 그 자리에 멈췄다 (안내 손님 놓침): 보낸 남은 칸을 버리고 lock을 푼다. 지금 노드 lock만 남김
   void abandon(const std::string& id);
   // 장애물로 막힘 (로봇 BLOCKED, 규칙 9): blocked 노드를 피해 다른 길로. 바꿨으면 true, info = 새 길 또는 못 바꾼 이유
-  bool reroute(const std::string& id, const std::string& blocked, std::string& info);
+  bool reroute(const std::string& id, const std::string& blocked, std::string& info, const std::string& kind = "");
   // 도크 노드에 있다고 아는데 실제로는 도크에서 빠져나와 서 있는 로봇 (빠진 자리에서 인사하다 손님 놓침):
   // 그 도크의 앞 노드를 거쳐 다시 넣는다 (D1: N1 -> D1. 입구 도킹은 N1에서 시작). 도크가 아니면 false
   bool redock(const std::string& id);
@@ -89,6 +89,7 @@ class TrafficManager {
 
   // ---- 조회
   std::vector<LockView> locks() const;
+  std::vector<ObstacleView> obstacles() const;   // 지금 피하는 장애물 노드 (관제 화면)
   bool isDockFree(const std::string& dock, const std::string& for_robot) const;
   double pathCost(const std::string& id, const std::string& target) const;  // 경로 없으면 -1
 
@@ -146,6 +147,7 @@ class TrafficManager {
   std::map<std::string, std::string> lock_;       // 노드 -> 로봇
   std::map<std::string, std::string> edge_lock_;  // "A|B" (이름 순) -> 로봇
   std::map<std::string, Clock::time_point> obstacles_;  // 장애물로 막힌 노드 -> 이때까지 피함 (규칙 9, 모든 로봇)
+  std::map<std::string, std::string> obstacle_kind_;   // 장애물 노드 -> 종류 (관제 화면 표시용)
   std::vector<Arrival> arrivals_;
   uint32_t next_cmd_id_ = 1;
 };

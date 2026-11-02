@@ -454,6 +454,15 @@ void ClientLinkManager::pushSnapshot(const SnapshotView& snap) {
     locks.push_back(std::move(o));
   }
   j["locks"] = std::move(locks);
+  wvalue::list obstacles;  // 관제 화면: 장애물로 막혀 피하는 노드 (빨간색)
+  for (const ObstacleView& ob : snap.obstacles) {
+    wvalue o;
+    o["node"] = ob.node;
+    o["kind"] = ob.kind;
+    o["left_sec"] = ob.left_sec;
+    obstacles.push_back(std::move(o));
+  }
+  j["obstacles"] = std::move(obstacles);
   wvalue::list tables;
   for (const TableView& t : snap.tables) tables.push_back(tableJson(t));
   j["tables"] = std::move(tables);

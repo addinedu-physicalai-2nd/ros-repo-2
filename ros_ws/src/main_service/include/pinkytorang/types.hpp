@@ -125,11 +125,18 @@ struct LockView {
   std::string robot_id;
 };
 
+struct ObstacleView {     // 장애물로 막힌 노드 (traffic 규칙 9) - 관제 화면 빨간 표시
+  std::string node;
+  std::string kind;      // STATIC / DYNAMIC / UNKNOWN (로봇 BLOCKED reason 앞부분, "" = 모름)
+  double left_sec = 0.0; // 피하는 시간 남은 초
+};
+
 struct SnapshotView {
   std::vector<RobotView> robots;
   std::vector<TaskView> tasks;
   std::vector<LockView> locks;
   std::vector<TableView> tables;
+  std::vector<ObstacleView> obstacles;
 };
 
 struct ConfirmView {

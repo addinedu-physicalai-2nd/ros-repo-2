@@ -345,7 +345,8 @@ void TaskManager::onRobotEvent(const std::string& id, uint8_t type, uint32_t cmd
   } else if (type == EVENT_BLOCKED) {
     // 장애물: 로봇이 block_wait_sec(10초) 기다려도 안 비킴 -> 막힌 노드를 피해 다른 길 (traffic 규칙 9)
     std::string info;
-    if (traffic_.reroute(id, node, info)) {
+    std::string kind = reason.substr(0, reason.find(':'));   // "STATIC:N2->N5" -> STATIC (관제 화면 표시)
+    if (traffic_.reroute(id, node, info, kind)) {
       alert("WARN", id, node + " 앞이 막혀 다른 길로 가요 (" + info + ")");
     } else {
       alert("WARN", id, "진행이 막혔어요 (" + node + ", " + info + "). 비키면 이어서 가요");
@@ -1162,6 +1163,7 @@ SnapshotView TaskManager::buildSnapshot() {
     s.tasks.push_back(view(t));
   }
   s.locks = traffic_.locks();
+  s.obstacles = traffic_.obstacles();
   for (const TableConfig& tc : cfg_.tables) {  // 설정 순서대로
     auto it = tables_.find(tc.id);
     if (it == tables_.end()) continue;
