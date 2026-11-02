@@ -19,31 +19,46 @@ h1 { font-size: 34px; font-weight: 800; letter-spacing: -.03em; line-height: 1.2
   display: flex; flex-direction: column; min-height: 0; padding: 18px 18px 12px;
   background: var(--surface); border: 1px solid var(--line); border-radius: 22px; box-shadow: var(--shadow);
 }
-/* 테이블은 실제 위치 순서대로 칸(행 · 열)에 놓는다. 입구는 실제로 있는 쪽 가장자리에 */
-.floor { flex: 1; min-height: 0; display: grid; gap: 14px; position: relative; }
+/* 배치도: 실제 간격대로 놓되 같은 줄은 한 줄로 (app.js renderFloor가 px 위치를 계산) */
+.floor { flex: 1; min-height: 0; position: relative; }
+.walls { position: absolute; left: 0; top: 0; overflow: visible; }
+.walls .floor-fill { fill: #fbfaf7; stroke: #ecebe6; stroke-width: 2; }
+.walls .wall { stroke: #55555a; stroke-width: 9; stroke-linecap: round; }
 .tbl {
-  border-radius: 18px; border: 3px solid var(--accent); background: var(--accent-weak);
+  position: absolute;
+  border-radius: 18px; border: 3px solid var(--accent); background: var(--surface);
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
-  font-weight: 800; font-size: 32px; color: var(--accent-ink); letter-spacing: -.02em;
-  transition: transform .08s, background .15s, box-shadow .15s; min-height: 0;
+  font-weight: 800; font-size: 28px; color: var(--accent-ink); letter-spacing: -.02em;
+  box-shadow: 0 4px 14px rgba(229, 72, 127, .12);
+  transition: transform .08s, background .15s, box-shadow .15s;
 }
-.tbl small { font-size: 15px; font-weight: 600; letter-spacing: 0; }
+.tbl small { font-size: max(12px, .42em); font-weight: 600; letter-spacing: 0; }
 .tbl:active:not(:disabled) { transform: scale(.96); }
-.tbl.selected { background: var(--accent); color: #fff; box-shadow: 0 8px 22px rgba(229, 72, 127, .35); }
-.tbl:disabled { border-color: var(--line); background: #f1f1ee; color: var(--faint); opacity: 1; }
-.door {
-  display: flex; align-items: center; justify-content: center; gap: 8px; border-radius: 14px;
-  background: #fbe9c8; color: #8a5a00; font-size: 15px; font-weight: 700; white-space: nowrap;
+.tbl.selected { background: var(--accent); color: #fff; box-shadow: 0 10px 26px rgba(229, 72, 127, .38); }
+.tbl:disabled { border-color: var(--line); background: #f1f1ee; color: var(--faint); box-shadow: none; opacity: 1; }
+
+/* 현위치 (입구) */
+.here { position: absolute; display: flex; align-items: center; gap: 8px; transform: translate(-50%, -50%); pointer-events: none; }
+.here .pin { position: relative; width: 22px; height: 22px; flex: none; }
+.here .pin i { position: absolute; inset: 4px; border-radius: 50%; background: #e09a1a; border: 3px solid #fff; box-shadow: 0 2px 6px rgba(0, 0, 0, .2); }
+.here .pin::before {
+  content: ""; position: absolute; inset: 0; border-radius: 50%; background: #e09a1a; opacity: .35;
+  animation: here-pulse 1.8s ease-out infinite;
 }
-.door.v { writing-mode: vertical-rl; letter-spacing: .1em; padding: 10px 0; }
-.door::before { content: ""; width: 10px; height: 10px; border-radius: 50%; background: #e09a1a; flex: none; }
+.here-text {
+  position: absolute; right: 30px; white-space: nowrap; display: flex; flex-direction: column; align-items: flex-end;
+  font-size: 13px; color: #8a5a00; line-height: 1.2;
+}
+.here-text b { font-size: 15px; font-weight: 800; }
+@keyframes here-pulse { from { transform: scale(.7); opacity: .5; } to { transform: scale(2.4); opacity: 0; } }
 
 .legend { display: flex; gap: 20px; padding-top: 12px; font-size: 15px; color: var(--muted); flex: none; }
 .legend span { display: inline-flex; align-items: center; gap: 8px; }
 .sw { width: 22px; height: 16px; border-radius: 5px; display: inline-block; }
-.sw.free { border: 3px solid var(--accent); background: var(--accent-weak); }
+.sw.free { border: 3px solid var(--accent); background: var(--surface); }
 .sw.busy { border: 3px solid var(--line); background: #f1f1ee; }
 .sw.sel { background: var(--accent); }
+.sw.spot { width: 14px; height: 14px; border-radius: 50%; background: #e09a1a; border: 3px solid #fff; box-shadow: 0 0 0 1px #e8c27a; }
 
 .panel { display: flex; flex-direction: column; justify-content: center; gap: 16px; }
 .sel-card {

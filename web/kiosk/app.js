@@ -3,12 +3,12 @@
 //   서버가 그 테이블을 예약하고 입구 로봇이 안내한다
 // - 테이블 상태(빈자리 / 사용 중)는 매장 snapshot으로 실시간으로 바뀐다
 // - 판단하지 않는다. 빈자리인지는 서버가 최종 확인한다 (이미 찼으면 409)
-// - 배치도: 테이블 맵 좌표를 실제 크기로 그리지 않고, 위치 순서(행 · 열)대로 큰 칸에 놓는다 (작은 화면에서 누르기 쉽게)
-//   입구는 실제로 있는 쪽 가장자리에. board.flip이면 매장 그림처럼 180도 돌려서
+// - 배치도: 매장 관제 화면과 같은 방향 (입구 오른쪽 아래, 테이블 윗줄 T2 T4 T6 / 아랫줄 T1 T3 T5). 손님 화면이라 주방은 안 그림.
+//   맵 좌표로 줄 · 칸 순서만 정하고, 테이블은 화면을 넉넉히 채우는 큰 정사각형으로 (실제 비율 아님, 누르기 쉽게)
 
 const $ = (id) => document.getElementById(id);
 const state = {
-  board: { x: 0, y: 0, w: 2.28, h: 1.82 }, entrance: null, tables: [],
+  board: { x: 0, y: 0, w: 2.28, h: 1.82 }, entrance: null, tables: [], map: null,
   selected: null, taskId: null, poll: null, resetTimer: null, resetTick: null, idleTimer: null,
 };
 const ENDED = ['DONE', 'FAILED', 'CANCELED'];
@@ -36,6 +36,10 @@ openSocket('/ws/store', (msg) => {
 loadLayout();
 
 async function loadLayout() {
+  if (!state.map) {
+    const m = await api('GET', '/api/map');      // 테이블 노드 · 픽업 위치 (배치도 모양)
+    if (m.ok && m.data && Array.isArray(m.data.nodes)) state.map = m.data;
+  }
   const r = await api('GET', '/api/tables');
   if (!r.ok) return;
   if (r.data.board) state.board = Object.assign({ x: 0, y: 0 }, r.data.board);
@@ -60,62 +64,85 @@ function mergeTables(list) {
   renderFloor();
 }
 
-// 맵 좌표 -> 화면 방향 (오른쪽 = +sx, 아래 = +sy). flip이면 180도
-function screenPos(p) {
-  const f = state.board.flip;
-  return { sx: f ? -p.x : p.x, sy: f ? p.y : -p.y };
-}
+// ---------- 배치도 ----------
+// 화면: 가로 = 맵 y, 세로 = 맵 x (매장 관제 화면과 같음 -> 입구 오른쪽 아래)
+const TABLE_BODY_M = 0.08;   // T 노드(통로 쪽 모서리)에서 테이블 가운데까지 (맵 -y 쪽)
 
-// 값들을 ROW_TOL 안에서 묶어 0, 1, 2 ... 순서로
-function clusterIndex(values) {
-  const sorted = [...values].sort((a, b) => a - b);
-  const centers = [];
-  sorted.forEach((v) => {
-    if (!centers.length || v - centers[centers.length - 1].last > ROW_TOL) centers.push({ last: v, sum: v, n: 1 });
-    else { const c = centers[centers.length - 1]; c.last = v; c.sum += v; c.n += 1; }
+function toScreen(x, y) { return { sx: y, sy: x }; }
+
+function tableCenters() {
+  const nodes = state.map ? state.map.nodes : [];
+  return state.tables.map((t) => {
+    const n = nodes.find((m) => m.stop_kind === 'SERVE' && m.table === t.id);
+    const p = n ? toScreen(n.x, n.y - TABLE_BODY_M) : toScreen(t.x, t.y);
+    return { t, sx: p.sx, sy: p.sy };
   });
-  const mids = centers.map((c) => c.sum / c.n);
-  return { count: mids.length, of: (v) => mids.reduce((best, m, i) => (Math.abs(m - v) < Math.abs(mids[best] - v) ? i : best), 0) };
 }
 
 function renderFloor() {
   const floor = $('floor');
   if (!state.tables.length) { floor.innerHTML = '<p class="empty">배치도를 불러오는 중…</p>'; return; }
-  const pts = state.tables.map((t) => Object.assign({ t }, screenPos(t)));
-  const cols = clusterIndex(pts.map((p) => p.sx));
-  const rows = clusterIndex(pts.map((p) => p.sy));
+  // 실제 위치로 줄 · 칸 순서만 정하고(같은 줄 맞춤), 크기는 화면을 넉넉히 채우게 (실제 비율 아님)
+  const pts = tableCenters();
+  const colOf = rankOf(pts.map((p) => p.sx)), rowOf = rankOf(pts.map((p) => p.sy));
+  const nCol = Math.max(...pts.map((p) => colOf(p.sx))) + 1, nRow = Math.max(...pts.map((p) => rowOf(p.sy))) + 1;
 
-  // 입구: 테이블 묶음 바깥 어느 쪽에 있나 (가장 많이 벗어난 쪽)
-  let door = null;
-  if (state.entrance) {
-    const e = screenPos(state.entrance);
-    const minX = Math.min(...pts.map((p) => p.sx)), maxX = Math.max(...pts.map((p) => p.sx));
-    const minY = Math.min(...pts.map((p) => p.sy)), maxY = Math.max(...pts.map((p) => p.sy));
-    const out = { left: minX - e.sx, right: e.sx - maxX, top: minY - e.sy, bottom: e.sy - maxY };
-    const side = Object.keys(out).reduce((a, b) => (out[b] > out[a] ? b : a));
-    door = { side, along: side === 'left' || side === 'right' ? rows.of(e.sy) : cols.of(e.sx) };
-  }
-  const dl = door && door.side === 'left', dr = door && door.side === 'right';
-  const dt = door && door.side === 'top', db = door && door.side === 'bottom';
-  floor.style.gridTemplateColumns = `${dl ? '58px ' : ''}repeat(${cols.count}, 1fr)${dr ? ' 58px' : ''}`;
-  floor.style.gridTemplateRows = `${dt ? '48px ' : ''}repeat(${rows.count}, 1fr)${db ? ' 48px' : ''}`;
-  const c0 = dl ? 2 : 1, r0 = dt ? 2 : 1;
+  const W = floor.clientWidth, H = floor.clientHeight;
+  const pad = 18, doorH = state.entrance ? 70 : 0;              // 아래 띠: 입구 통로 (칸막이 아래)
+  const cellW = (W - pad * 2) / nCol, cellH = (H - pad * 2 - doorH) / nRow;
+  const size = Math.min(cellW, cellH) * 0.8;
+  const fs = Math.round(Math.min(size * 0.26, 40));
 
-  let html = pts.map((p) => {
+  // 입구 칸막이 벽: 테이블 줄과 입구(현위치) 사이. 오른쪽 벽에서 시작해 ENTRY_WALL.y0 까지 (그 왼쪽이 홀로 들어가는 길)
+  //   가로 위치는 실제 y를 테이블 열 가운데 사이로 보간해서 정함
+  const colReal = [...new Set(pts.map((p) => colOf(p.sx)))].sort((a, b) => a - b)
+    .map((c) => { const g = pts.filter((p) => colOf(p.sx) === c); return [g.reduce((a, p) => a + p.sx, 0) / g.length, pad + (c + 0.5) * cellW]; });
+  const realToPx = (v) => {
+    let i = 0;
+    while (i < colReal.length - 2 && v > colReal[i + 1][0]) i++;
+    const [a, pa] = colReal[i], [b, pb] = colReal[Math.min(i + 1, colReal.length - 1)];
+    return b === a ? pa : pa + (v - a) / (b - a) * (pb - pa);
+  };
+  const r = 16, wy = H - doorH - 4;                                  // 칸막이 높이 (아래 띠 위)
+  const wx0 = Math.max(pad, realToPx(ENTRY_WALL.y0));
+  const stripY = (wy + H) / 2;                                        // 입구 띠 가운데
+  const pinX = W - pad - 30;
+  let html = `<svg class="walls" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
+    <rect class="floor-fill" x="1" y="1" width="${W - 2}" height="${H - 2}" rx="${r}"/>
+    ${state.entrance ? `<line class="wall" x1="${f0(wx0)}" y1="${f0(wy)}" x2="${W - 6}" y2="${f0(wy)}"/>` : ''}
+  </svg>`;
+  html += pts.map((p) => {
     const t = p.t, free = t.state === 'FREE', sel = t.id === state.selected;
     const label = sel ? '고른 자리' : free ? '빈자리' : '사용 중';
+    const cx = pad + (colOf(p.sx) + 0.5) * cellW, cy = pad + (rowOf(p.sy) + 0.5) * cellH;
     return `<button class="tbl ${sel ? 'selected' : ''}" data-id="${esc(t.id)}" ${free ? '' : 'disabled'}
-      style="grid-column:${c0 + cols.of(p.sx)}; grid-row:${r0 + rows.of(p.sy)}">${esc(t.id)}<small>${label}</small></button>`;
+      style="left:${cx - size / 2}px; top:${cy - size / 2}px; width:${size}px; height:${size}px; font-size:${fs}px">
+      ${esc(t.id)}<small>${label}</small></button>`;
   }).join('');
-  if (door) {
-    const vertical = door.side === 'left' || door.side === 'right';
-    const col = dl ? 1 : dr ? c0 + cols.count : c0 + door.along;
-    const row = dt ? 1 : db ? r0 + rows.count : r0 + door.along;
-    html += `<span class="door ${vertical ? 'v' : ''}" style="grid-column:${col}; grid-row:${row}">입구 · 지금 여기</span>`;
+  if (state.entrance) {
+    html += `<div class="here" style="left:${pinX}px; top:${stripY}px">
+      <span class="pin"><i></i></span><span class="here-text"><b>현위치</b>입구</span></div>`;
   }
   floor.innerHTML = html;
   floor.querySelectorAll('.tbl').forEach((b) => { b.onclick = () => selectTable(b.dataset.id); });
   renderPanel();
+}
+
+// 값을 ROW_TOL 안에서 묶어 0, 1, 2 ... 순서로 (같은 줄 · 칸)
+const f0 = (v) => v.toFixed(0);
+// 입구 칸막이 벽 (맵 v5 실측: x 1.68 m 에서 y 0.76 (바깥 벽) ~ -0.44 m). 화면에서는 테이블 줄과 현위치 사이 가로 벽
+const ENTRY_WALL = { x: 1.68, y0: -0.44, y1: 0.76 };
+
+function rankOf(values) {
+  const sorted = [...values].sort((a, b) => a - b);
+  const mids = [];
+  let g = null;
+  sorted.forEach((v) => {
+    if (!g || v - g.last > ROW_TOL) { g = { last: v, sum: v, n: 1 }; mids.push(g); }
+    else { g.last = v; g.sum += v; g.n += 1; }
+  });
+  const centers = mids.map((m) => m.sum / m.n);
+  return (v) => centers.reduce((best, c, i) => (Math.abs(c - v) < Math.abs(centers[best] - v) ? i : best), 0);
 }
 
 function renderPanel() {
