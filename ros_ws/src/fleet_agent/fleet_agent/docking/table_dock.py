@@ -53,6 +53,8 @@ DEFAULTS = {
     'spread_warn_deg': 3.0,  # 측정 흔들림 경고
     'dist': 0.05,            # table_exit: 서빙 뒤 전진 거리 (m)
     'v_exit': 0.04,
+    'accel': 0.10,           # 출발 가속 제한 (m/s^2). 정렬 뒤 급출발하면 바퀴가 미끄러져 옆/방향이 틀어짐
+    'w_start': 0.10,         # 출발 직후 방향 보정 최대 (rad/s). 속도가 붙을수록 0.4까지
 }
 
 
@@ -151,6 +153,7 @@ class TableDocker:
         self.tf_buf = tf_buf
         self.cam = cam
         self.ir = ir if ir is not None else {'v': None, 'n': 0}
+        self.c = dict(DEFAULTS)
 
     # ------------------------------------------------------------ 준비
     def _cfg(self, req):
@@ -229,12 +232,17 @@ class TableDocker:
         return r
 
     # ------------------------------------------------------------ 이동 (선 세며)
-    def _drive(self, dk, lc, x, y, vmax, stop_on=None):
-        """(x, y)까지 직진하며 선 세기 (Docker.drive_to + 선). stop_on개 세면 그 자리에서 정지. 반환: 선에서 멈췄나"""
+    def _drive(self, dk, lc, x, y, vmax, stop_on=None, c=None):
+        """(x, y)까지 직진하며 선 세기 (Docker.drive_to + 선). stop_on개 세면 그 자리에서 정지. 반환: 선에서 멈췄나
+        출발은 accel로 천천히 올림 (정렬 직후 급출발 -> 바퀴 미끄러짐 -> 옆 · 방향 틀어짐 방지).
+        방향 보정(w)도 속도가 붙기 전엔 w_start까지만 (서 있는 상태에서 큰 w = 제자리 회전이라 옆으로 밀림)"""
+        c = c or self.c
+        acc, w0 = c['accel'], c['w_start']
         p0 = dk.pose()
         line = math.atan2(y - p0[1], x - p0[0])
         u = np.array([math.cos(line), math.sin(line)])
-        t0, v = time.time(), 0.0
+        t0 = t_prev = time.time()
+        v = 0.0
         hit = False
         while time.time() - t0 < md.MOVE_TIMEOUT_S:
             p = dk.pose()
@@ -246,8 +254,12 @@ class TableDocker:
             remain = float(u @ (np.array([x, y]) - np.array(p[:2])))
             if remain < max(md.LIN_TOL_M, v * md.STOP_LEAD_S):
                 break
-            v = md.clamp(md.LIN_K * remain, md.LIN_V_MIN, vmax)
-            dk.send(v, md.clamp(md.HEADING_K * md.wrap(line - p[2]), -0.4, 0.4))
+            now = time.time()
+            dt, t_prev = min(now - t_prev, 0.1), now
+            v_want = md.clamp(md.LIN_K * remain, md.LIN_V_MIN, vmax)
+            v = min(v_want, v + acc * dt)               # 가속만 제한 (감속은 remain 비례 그대로)
+            w_lim = w0 + (0.4 - w0) * min(1.0, v / max(vmax, 1e-3))
+            dk.send(v, md.clamp(md.HEADING_K * md.wrap(line - p[2]), -w_lim, w_lim))
             time.sleep(1 / md.MOVE_HZ)
         dk.stop()
         return hit
@@ -268,6 +280,7 @@ class TableDocker:
     # ------------------------------------------------------------ table
     def run(self, req):
         c = self._cfg(req)
+        self.c = c
         node_id, src = req.get('node', '?'), req.get('from_node')
         f = (req.get('from') or {}).get(src)
         if f is None:
@@ -332,7 +345,8 @@ class TableDocker:
         if c['line_offset'] > 0:
             lc.on = False
             q = dk.pose()
-            dk.drive_to(q[0] + c['line_offset'] * math.cos(goal[2]), q[1] + c['line_offset'] * math.sin(goal[2]))
+            self._drive(dk, lc, q[0] + c['line_offset'] * math.cos(goal[2]),
+                        q[1] + c['line_offset'] * math.sin(goal[2]), c['v_line'])
         p = dk.pose()
         _, lat, dth = lane_offset(p, goal)
         md.log(f'[정지선] {c["lines"]}번째 선에서 정지: 차선에서 옆 {lat * 1000:+.1f} mm, 방향 {math.degrees(dth):+.2f}° '
@@ -343,7 +357,8 @@ class TableDocker:
     def leave(self, req):
         c = self._cfg(req)
         md.open_log(f'{req.get("node")}_table_exit')
-        mv = Motion(self.node, self.pub, self.cancelled, self.tf_buf, self.ir, dict(LINE_DEFAULTS))
+        mv = Motion(self.node, self.pub, self.cancelled, self.tf_buf, self.ir,
+                    dict(LINE_DEFAULTS, accel=c['accel']))     # 빼기도 같은 가속 제한
         mv.dk.wait_pose()
         h = mv.dk.pose()[2]
         why, s, _ = mv.drive(c['dist'], False, h, c['v_exit'])
