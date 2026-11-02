@@ -59,6 +59,7 @@ bool loadConfig(const std::string& path, Config& cfg, std::string& error) {
     if (root["detour_max_m"]) cfg.detour_max_m = root["detour_max_m"].as<double>();
     if (root["detour_wait_sec"]) cfg.detour_wait_sec = root["detour_wait_sec"].as<double>();
     if (root["avoid_sec"]) cfg.avoid_sec = root["avoid_sec"].as<double>();
+    if (root["block_avoid_sec"]) cfg.block_avoid_sec = root["block_avoid_sec"].as<double>();
     if (root["localize_radius_m"]) cfg.localize_radius_m = root["localize_radius_m"].as<double>();
     if (root["done_keep_sec"]) cfg.done_keep_sec = root["done_keep_sec"].as<int>();
 

@@ -220,6 +220,7 @@ void TrafficManager::onNodeReached(const std::string& id, const std::string& nod
     const MapNode* hn = map_.node(r.at);
     r.table_entry = (hn && hn->stop_kind == "SERVE" && prev != r.at) ? prev : "";
     if (r.at == r.reserved_exit) r.reserved_exit = "";
+    if (obstacles_.erase(r.at)) logLine("TRAFFIC", id + " " + r.at + " 지나감 -> 장애물 치워진 것으로 봄");
     if (r.at == node) break;
   }
   tick();  // 풀린 lock을 기다리던 로봇이 있을 수 있다
@@ -289,6 +290,71 @@ void TrafficManager::abandon(const std::string& id) {
   clearGoal(id);
   logLine("TRAFFIC", id + " 멈춤 · 남은 경로 버림 (" + r.at + ")");
   tick();  // 풀린 lock을 기다리던 로봇
+}
+
+// ---------------------------------------------------------------- 장애물 우회 (규칙 9)
+
+bool TrafficManager::reroute(const std::string& id, const std::string& blocked, std::string& info) {
+  auto it = robots_.find(id);
+  if (it == robots_.end() || !it->second.localized || it->second.goal.empty()) {
+    info = "목적지 없음";
+    return false;
+  }
+  Robot& r = it->second;
+  if (blocked.empty() || !map_.node(blocked)) {
+    info = "막힌 노드 모름";
+    return false;
+  }
+  if (blocked == r.goal) {
+    info = "막힌 곳이 도착지";
+    return false;
+  }
+  if (blocked == r.at) {
+    info = "지금 노드가 막힘";
+    return false;
+  }
+  // 막힌 노드 + 늘 빼는 노드(우회 중 · 테이블 들어온 노드 · 다른 로봇이 잡아 둔 나갈 칸)를 빼고 지금 노드에서 다시
+  std::set<std::string> ban = baseBan(r);
+  ban.insert(blocked);
+  for (const auto& pair : robots_) {
+    const Robot& o = pair.second;
+    if (o.id != r.id && !o.reserved_exit.empty() && o.reserved_exit != r.goal) ban.insert(o.reserved_exit);
+  }
+  std::vector<std::string> alt = map_.shortestPathAvoid(r.at, r.goal, ban);
+  if (alt.size() < 2 || contains(alt, blocked)) {
+    info = "다른 길 없음";
+    return false;
+  }
+
+  // 보낸 칸 · 길 lock을 놓는다 (지금 노드 lock만 남김). 목적지 · 안내 · 바라볼 곳은 그대로
+  for (auto lit = lock_.begin(); lit != lock_.end();) {
+    if (lit->second == id && lit->first != r.at) lit = lock_.erase(lit);
+    else ++lit;
+  }
+  for (auto eit = edge_lock_.begin(); eit != edge_lock_.end();) {
+    if (eit->second == id) eit = edge_lock_.erase(eit);
+    else ++eit;
+  }
+  r.reserved_exit = "";
+  r.committed.clear();
+  r.via = "";
+  r.waiting = false;
+  r.waiting_for = "";
+  r.cmd_active = false;  // 다음 Move는 REPLACE (로봇이 들고 있는 막힌 길을 버리게)
+  // 장애물 기록: 모든 로봇이 block_avoid_sec 동안 피함 (목적지가 바뀌어도). 누가 지나가면 onNodeReached에서 풂
+  obstacles_[blocked] = Clock::now() + std::chrono::milliseconds(static_cast<int>(cfg_.block_avoid_sec * 1000));
+  r.route_start = r.at;
+
+  // 로봇은 at과 막힌 노드 사이에 서 있다 -> 먼저 at으로 돌아가게 [at]을 REPLACE로, 새 길은 tryExtend가 APPEND
+  r.committed.push_back(r.at);
+  r.plan.assign(alt.begin() + 1, alt.end());  // at의 yaw = 새 길 다음 노드 쪽
+  publish(r, r.committed, false);
+  info = join(alt);
+  logLine("TRAFFIC", id + " 장애물로 " + blocked + " 막힘 -> 다른 길 [" + info + "] (" +
+                         std::to_string(static_cast<int>(cfg_.block_avoid_sec)) + "초 동안 " + blocked + " 피함)");
+  tryExtend(r);
+  tick();  // 놓은 lock을 기다리던 로봇
+  return true;
 }
 
 // ---------------------------------------------------------------- 멈춤 · 재전송
@@ -403,6 +469,9 @@ bool TrafficManager::canLock(const Robot& r, const std::vector<std::string>& seg
 std::set<std::string> TrafficManager::baseBan(const Robot& r) const {
   std::set<std::string> ban;
   if (!r.avoid.empty() && Clock::now() < r.avoid_until) ban = r.avoid;
+  for (const auto& ob : obstacles_) {               // 장애물로 막힌 노드 (규칙 9, 기한 안)
+    if (Clock::now() < ob.second) ban.insert(ob.first);
+  }
   // 테이블 칸에서 나갈 때는 들어온 노드로 되돌아가지 않는다 (반대 노드로 나감)
   if (cfg_.table_pass_through && lastSent(r) == r.at && !r.table_entry.empty()) ban.insert(r.table_entry);
   return ban;

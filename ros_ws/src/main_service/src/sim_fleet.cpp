@@ -50,6 +50,11 @@ void SimFleet::sendMove(const std::string& robot_id, const MoveCmd& cmd) {
     b.path.clear();  // REPLACE: 경로 교체
     b.cmd_id = cmd.cmd_id;
     b.dock_wait = 0.0;
+    if (b.block_t >= 0.0) {  // 막혀 서 있다가 새 길을 받음 (서버 우회)
+      logLine("SIM", b.id + " 장애물 앞에서 새 길 받음");
+      b.block_t = -1.0;
+      b.block_done = true;
+    }
   }
   b.guide = cmd.guide;
   for (const WaypointCmd& w : cmd.waypoints) b.path.push_back({w, rev});
@@ -109,6 +114,39 @@ void SimFleet::step(Bot& b, double dt, std::vector<PendingEvent>& out) {
     b.running = false;
     out.push_back({b.id, EVENT_CMD_DONE, b.cmd_id, b.last_node});
     return;
+  }
+
+  // 장애물 시험 (SIM_BLOCK=<노드>[:<비키는 초>]): 그 노드 앞 block_lead m에서 멈춤
+  const char* blk = std::getenv("SIM_BLOCK");
+  if (blk && !b.block_done && !b.path.empty()) {
+    std::string spec(blk), bnode = spec;
+    double clear_sec = -1.0;
+    size_t colon = spec.find(':');
+    if (colon != std::string::npos) {
+      bnode = spec.substr(0, colon);
+      clear_sec = std::atof(spec.c_str() + colon + 1);
+    }
+    const WaypointCmd& f = b.path.front().w;
+    const double block_lead = 0.12;
+    if (f.node_id == bnode && (b.block_t >= 0.0 || std::hypot(f.x - b.x, f.y - b.y) <= block_lead)) {
+      if (b.block_t < 0.0) {
+        b.block_t = 0.0;
+        logLine("SIM", b.id + " " + bnode + " 앞 장애물 -> 멈춤");
+      }
+      b.block_t += dt;
+      const double wait = 10.0;  // 로봇 fleet_agent.yaml block_wait_sec
+      if (clear_sec >= 0.0 && b.block_t >= clear_sec) {
+        logLine("SIM", b.id + " 장애물 없어짐 -> 그대로 이어 감");
+        b.block_t = -1.0;
+        b.block_done = true;
+      } else {
+        if (!b.block_reported && b.block_t >= wait) {
+          b.block_reported = true;
+          out.push_back({b.id, EVENT_BLOCKED, b.cmd_id, bnode, "STATIC:" + b.last_node + "->" + bnode});
+        }
+        return;
+      }
+    }
   }
 
   double move = speed_ * dt;  // 이번에 갈 수 있는 거리
@@ -184,7 +222,7 @@ void SimFleet::loop() {
     if (!tasks_) continue;
     for (const PendingEvent& e : events) tasks_->onRobotEvent(e.robot_id, e.type, e.cmd_id, e.node, e.reason);
     for (const Bot& b : states) {
-      uint8_t st = b.paused ? 2 : (b.running ? 1 : 0);
+      uint8_t st = b.paused ? 2 : (b.block_t >= 0.0 ? 3 : (b.running ? 1 : 0));
       tasks_->onRobotState(b.id, b.x, b.y, b.yaw, st, b.last_node, static_cast<float>(b.battery));
     }
   }

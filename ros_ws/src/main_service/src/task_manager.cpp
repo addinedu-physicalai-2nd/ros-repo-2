@@ -343,7 +343,13 @@ void TaskManager::onRobotEvent(const std::string& id, uint8_t type, uint32_t cmd
     updateHold(*r);
     alert("ERROR", id, "이동 실패 " + reason + ". 확인 후 재개해 주세요");
   } else if (type == EVENT_BLOCKED) {
-    alert("WARN", id, "진행이 막혔어요 (" + node + ")");
+    // 장애물: 로봇이 block_wait_sec(10초) 기다려도 안 비킴 -> 막힌 노드를 피해 다른 길 (traffic 규칙 9)
+    std::string info;
+    if (traffic_.reroute(id, node, info)) {
+      alert("WARN", id, node + " 앞이 막혀 다른 길로 가요 (" + info + ")");
+    } else {
+      alert("WARN", id, "진행이 막혔어요 (" + node + ", " + info + "). 비키면 이어서 가요");
+    }
   } else if (type == EVENT_DOCKED) {
     // 로봇이 도크(D1 · D2 · D3)에 정밀 도킹을 끝냄 (CMD_DONE 바로 앞). 실패면 Nav2 위치로 섬
     if (reason.empty()) alert("INFO", id, node + " 도킹 완료");

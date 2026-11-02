@@ -18,6 +18,11 @@
 //      - 앞 로봇이 서 있으면(목적지 도착 · 멈춤) 길이 상관없이 우회
 //      - 움직이는 중이면 우회가 detour_max_m 이하로 길어질 때만 우회, 아니면 기다림 (detour_wait_sec 지나면 우회)
 //      - 서로 기다리는 중(교착)이면 우회, 우회 길도 없으면 한 대가 옆 칸으로 비켜 준다
+//   9. 장애물(사람 · 물건)로 막힘: 로봇이 block_wait_sec 기다려도 안 비키면 BLOCKED(막힌 노드)를 보낸다
+//      -> reroute: 막힌 노드를 block_avoid_sec 동안 빼고 지금 노드(at)에서 목적지까지 다시 계산
+//         (장애물은 그 자리에 있는 물체라 모든 로봇 · 다음 목적지에도 적용. 누가 그 노드를 지나가면 치워진 것으로 봄)
+//         다른 길이 있으면 보낸 칸을 버리고 [at, 새 길...]을 REPLACE (로봇은 at으로 돌아갔다가 새 길로)
+//         없으면(막힌 곳이 도착지 · 다른 길 없음) 그대로 둠 -> 로봇은 그 자리에서 기다리다 비키면 이어 감
 #pragma once
 
 #include <chrono>
@@ -57,6 +62,8 @@ class TrafficManager {
   bool setGoal(const std::string& id, const std::string& node, bool guide, const std::string& face_node = "");
   // 로봇이 그 자리에 멈췄다 (안내 손님 놓침): 보낸 남은 칸을 버리고 lock을 푼다. 지금 노드 lock만 남김
   void abandon(const std::string& id);
+  // 장애물로 막힘 (로봇 BLOCKED, 규칙 9): blocked 노드를 피해 다른 길로. 바꿨으면 true, info = 새 길 또는 못 바꾼 이유
+  bool reroute(const std::string& id, const std::string& blocked, std::string& info);
   // 도크 노드에 있다고 아는데 실제로는 도크에서 빠져나와 서 있는 로봇 (빠진 자리에서 인사하다 손님 놓침):
   // 그 도크의 앞 노드를 거쳐 다시 넣는다 (D1: N1 -> D1. 입구 도킹은 N1에서 시작). 도크가 아니면 false
   bool redock(const std::string& id);
@@ -138,6 +145,7 @@ class TrafficManager {
   std::map<std::string, Robot> robots_;
   std::map<std::string, std::string> lock_;       // 노드 -> 로봇
   std::map<std::string, std::string> edge_lock_;  // "A|B" (이름 순) -> 로봇
+  std::map<std::string, Clock::time_point> obstacles_;  // 장애물로 막힌 노드 -> 이때까지 피함 (규칙 9, 모든 로봇)
   std::vector<Arrival> arrivals_;
   uint32_t next_cmd_id_ = 1;
 };

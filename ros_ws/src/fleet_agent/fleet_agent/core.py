@@ -186,17 +186,23 @@ class ObstacleClass:
 
 class BlockPolicy:
     """멈춘 뒤 서버에 BLOCKED를 보낼 때 (README 장애물 단계)
+    wait > 0 (block_wait_sec, 기본 10초): 종류와 상관없이 막힌 지 wait 초 뒤 보고.
+        dynamic_wait 초부터 보고 전까지 LCD '지나갈게요'. 그사이 비키면 그대로 이어 감
+        (서 있는 레고 인형은 LiDAR로는 거리 변화가 없어 STATIC으로 잡힌다 -> 사람 · 물건 똑같이 기다림)
+        보고(BLOCKED) 받은 서버는 막힌 노드를 피해 다른 길을 찾는다 (없으면 로봇은 계속 기다림)
+    wait <= 0 (예전 방식):
     - 사람(DYNAMIC): dynamic_wait 초 기다림 -> dynamic_ask 초 동안 LCD '지나갈게요' -> 보고
     - 물건(STATIC) : static_wait 초 확인 -> 보고
     - 모름(UNKNOWN): unknown_wait 초 뒤 보고
     보고는 한 번만. 길이 비면 처음부터.
     """
 
-    def __init__(self, dynamic_wait=3.0, dynamic_ask=5.0, static_wait=2.0, unknown_wait=8.0):
+    def __init__(self, dynamic_wait=3.0, dynamic_ask=5.0, static_wait=2.0, unknown_wait=8.0, wait=0.0):
         self.dynamic_wait = dynamic_wait
         self.dynamic_ask = dynamic_ask
         self.static_wait = static_wait
         self.unknown_wait = unknown_wait
+        self.wait = wait
         self.since = None
         self.reported = False
 
@@ -211,7 +217,10 @@ class BlockPolicy:
         el = t - self.since
         ask = False
         due = None
-        if kind == 'DYNAMIC':
+        if self.wait > 0:                 # 종류와 상관없이 wait 초
+            due = self.wait
+            ask = self.dynamic_wait <= el < due
+        elif kind == 'DYNAMIC':
             ask = self.dynamic_wait <= el < self.dynamic_wait + self.dynamic_ask
             due = self.dynamic_wait + self.dynamic_ask
         elif kind == 'STATIC':

@@ -64,6 +64,7 @@ lock_lookahead: 2               # 로봇 앞쪽으로 미리 잡는 lock 노드 
 detour_max_m: 1.0               # 앞 로봇이 움직이는 중이면 우회가 이만큼(m) 이하로 길어질 때만 돌아감, 아니면 기다림
 detour_wait_sec: 8              # 이만큼 기다려도 안 풀리면 길이 상관없이 우회
 avoid_sec: 6                    # 우회를 정하면 막힌 노드를 이 시간 동안 경로 계산에서 뺌
+block_avoid_sec: 60             # 장애물로 막힘(로봇이 block_wait_sec 기다려도 안 비킴 -> BLOCKED): 그 노드를 이 시간 동안 피해 다른 길
 localize_radius_m: 0.15         # last_node가 비어 있을 때 좌표로 노드 찾는 반경
 
 # ---- UI

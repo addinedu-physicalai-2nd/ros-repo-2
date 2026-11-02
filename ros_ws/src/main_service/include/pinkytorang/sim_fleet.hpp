@@ -2,6 +2,9 @@
 // - 받은 Waypoint 쪽으로 직선으로 움직이며 NODE_REACHED / CMD_DONE / 상태를 Task Manager에 알린다
 // - 도킹 노드에서는 1초 기다렸다가 CMD_DONE (정밀 도킹 흉내)
 // - 배터리: 움직이면 줄고 도킹에 서 있으면 찬다 (충전 규칙 확인용)
+// - 장애물 시험: SIM_BLOCK=<노드>[:<비키는 초>] 면 그 노드로 가다 앞에서 멈춘다 (로봇 실제 동작과 같게)
+//   block_wait_sec(10초) 기다려도 안 비키면 BLOCKED -> 서버가 다른 길(REPLACE)을 주면 그 길로.
+//   비키는 초를 주면 그만큼 뒤 장애물이 없어져 그대로 이어 감. 로봇마다 한 번만 막힘
 #pragma once
 
 #include <atomic>
@@ -51,6 +54,9 @@ class SimFleet : public IFleetOut {
     double dock_wait = 0.0;          // 남은 정밀 도킹 시간 (초)
     double loc_wait = 0.0;           // 남은 위치 맞추기 시간 (초, Control LOCALIZE)
     double battery = 90.0;           // %
+    double block_t = -1.0;           // 장애물 앞에서 멈춘 지 몇 초 (-1 = 안 막힘)
+    bool block_reported = false;     // BLOCKED 보냄
+    bool block_done = false;         // 이미 한 번 막혔음 (SIM_BLOCK은 로봇마다 한 번)
   };
 
   // 바깥(Task Manager)에 알릴 이벤트. 자물쇠를 푼 뒤에 한꺼번에 보낸다

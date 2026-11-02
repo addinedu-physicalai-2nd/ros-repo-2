@@ -58,8 +58,15 @@
   `CMD_FAILED reason="corridor_failed:<맡긴 끝 노드>:<이유>"` -> 서버 고장 처리 (lock 유지). 재개하면 남은 노드로 다시 맡김
 - 줄이 비면 `done_grace_sec`(0.5초) 기다린 뒤 끝 처리: 후진으로 왔으면 노드 yaw로 회전 → `dock` / `tape`면 docking → `CMD_DONE`
 - 장애물 (obstacle `blocked`): 멈추고 `state = BLOCKED`
-  - 사람: 3초 기다림 → 5초 LCD "지나갈게요" → 서버에 `BLOCKED` (`reason = "DYNAMIC:N14->N15"`)
-  - 물건: 2초 확인 → `BLOCKED` (`reason = "STATIC:..."`)
+  - 사람 · 물건 모두 `block_wait_sec`(10초) 기다림, 3초부터 LCD "지나갈게요". 그 전에 비키면 그대로 이어 감
+    (서 있는 레고 인형은 LiDAR로는 거리 변화가 없어 STATIC으로 잡혀서 종류를 가리지 않음)
+  - 10초 지나도 있으면 서버에 `BLOCKED` 한 번 (`node = 막힌 노드`, `reason = "STATIC:N2->N5"`)
+  - 서버(TrafficManager 규칙 9 `reroute`): 막힌 노드를 `block_avoid_sec`(60초) 동안 빼고 지금 노드에서 다시 계산
+    - 다른 길 있음: `[지금 노드]` REPLACE + 새 길 APPEND → 로봇은 지금 노드로 돌아갔다가 새 길로.
+      다른 로봇 · 다음 목적지도 그 노드를 피함 (누가 그 노드를 지나가면 치워진 것으로 보고 풂)
+    - 다른 길 없음 · 막힌 곳이 도착지: 그대로 → 로봇은 서서 기다리다 비키면 원래 길로
+  - 시험 (ROS 없이): `SIM_BLOCK=N5 main_service_sim <cfg> 3` (안 비킴) / `SIM_BLOCK=N5:5` (5초 뒤 비킴) → 키오스크에서 테이블 고르기
+  - 예전 방식(사람 8초 · 물건 2초): `block_wait_sec: 0`
   - 길이 비면 그 노드부터 다시 출발
 - `PAUSE`는 멈춤(줄 유지), `RESUME`은 이어서, `CANCEL`은 줄 비우고 정지
 - Nav2 실패면 `CMD_FAILED` + `state = ERROR`. 서버가 RESUME을 보내면 남은 경로를 다시 받는다
