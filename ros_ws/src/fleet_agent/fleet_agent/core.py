@@ -188,6 +188,36 @@ class ObstacleClass:
         return 'UNKNOWN'
 
 
+def near_person(boxes, min_h=0.35, x_band=0.30):
+    """카메라로 본 손님 박스 중 '바로 앞에 있다'가 있나 (LiDAR에 안 잡히는 작은 레고 사람용)
+    boxes = [(x1, y1, x2, y2), ...] 화면 크기로 나눈 0~1 값
+    - 박스 높이가 화면의 min_h 이상 = 가까움 (멀리 있는 손님 · 테이블 옆 인형은 작게 보임)
+    - 박스 가운데가 화면 가운데에서 x_band 안 = 가는 길 위 (옆으로 비켜 선 사람은 안 막음)"""
+    for x1, y1, x2, y2 in boxes:
+        if y2 - y1 >= min_h and abs((x1 + x2) / 2 - 0.5) <= x_band:
+            return True
+    return False
+
+
+class CameraBlock:
+    """guide 노드가 보낸 '바로 앞에 사람' (/obstacle/camera)을 막힘으로 쓸지
+    - true를 받으면 hold초 동안 막힘. false를 받으면 바로 풀림 (사람이 비키면 곧장 출발)
+    - 카메라 결과가 끊기면(guide 노드 멈춤 · 프레임 없음) hold 뒤 저절로 풀림 -> 영원히 서 있지 않음"""
+
+    def __init__(self, hold=1.0):
+        self.hold = hold
+        self.t = -1e9
+
+    def update(self, t, near):
+        self.t = t if near else -1e9
+
+    def active(self, t):
+        return t - self.t < self.hold
+
+    def reset(self):
+        self.t = -1e9
+
+
 class BlockPolicy:
     """멈춘 뒤 서버에 BLOCKED를 보낼 때 (README 장애물 단계)
     wait > 0 (block_wait_sec, 기본 10초): 종류와 상관없이 막힌 지 wait 초 뒤 보고.

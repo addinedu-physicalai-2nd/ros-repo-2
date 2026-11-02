@@ -14,6 +14,9 @@
   멈춰 있을 때(직진 0 · 회전 0)는 그대로 봄 (막혀서 선 상태가 풀렸다 걸렸다 하지 않게)
 - 카메라(YOLO) 사람 판별: 앞으로 갈 때 막히면 guide 노드가 1초에 한 번 YOLO -> /obstacle/person.
   person_hold_sec 안에 true가 왔으면 PERSON (guide 노드 · 모델이 없으면 예전처럼 LiDAR로만)
+- 카메라 막힘 /obstacle/camera (std_msgs/Bool): 작은 레고 사람은 LiDAR 높이 아래라 안 잡혀 밀고 감 ->
+  앞으로 갈 때 guide 노드가 YOLO로 '바로 앞 손님'(박스가 크고 가운데)을 보면 true -> LiDAR가 못 봐도 막힘(PERSON).
+  false가 오면 바로 풀림 (사람 치우면 출발). 결과가 camera_hold_sec 넘게 안 오면 저절로 풀림
 """
 import json
 import math
@@ -26,7 +29,7 @@ from geometry_msgs.msg import Twist
 from sensor_msgs.msg import LaserScan
 from std_msgs.msg import Bool, String
 
-from .core import ObstacleClass, wrap
+from .core import CameraBlock, ObstacleClass, wrap
 
 
 class ObstacleNode(Node):
@@ -56,7 +59,15 @@ class ObstacleNode(Node):
         self.person_hold = p('person_hold_sec', 2.0).value   # 카메라가 사람을 본 결과를 이만큼 믿음
         self.person_t = -1e9
         self.create_subscription(Bool, '/obstacle/person', self.on_person, 10)
+        self.camera = CameraBlock(hold=p('camera_hold_sec', 1.0).value)
+        self.camera_on = p('camera_block', True).value
+        self.cam_was = False
+        self.create_subscription(Bool, '/obstacle/camera', self.on_camera, 10)
         self.get_logger().info('obstacle 노드 시작')
+
+    def on_camera(self, msg):
+        if self.camera_on:
+            self.camera.update(self.get_clock().now().nanoseconds * 1e-9, msg.data)
 
     def on_person(self, msg):
         if msg.data:
@@ -69,6 +80,7 @@ class ObstacleNode(Node):
         if msg.data != self.direction:
             self.direction = msg.data
             self.cls.reset()
+            self.camera.reset()          # 방향이 바뀌면 예전 카메라 결과는 버림
 
     def nearest(self, scan, center):
         """center 방향 +- sector 안에서 가장 가까운 거리 (없으면 inf)"""
@@ -96,7 +108,15 @@ class ObstacleNode(Node):
             rev = self.direction == 'REVERSE'
             dist = self.nearest(scan, math.pi if rev else 0.0)
             blocked = dist < (self.stop_rear if rev else self.stop_front)
-        person = blocked and self.direction == 'FORWARD' and now - self.person_t < self.person_hold   # 카메라는 앞만 봄
+        cam = self.direction == 'FORWARD' and not spinning and self.camera.active(now)   # 카메라는 앞만 봄
+        if cam != self.cam_was:
+            self.cam_was = cam
+            self.get_logger().info('카메라: 바로 앞에 사람 -> 멈춤' if cam else '카메라: 앞 사람 없어짐')
+        if cam and not blocked:
+            blocked = True               # LiDAR엔 안 잡히는 작은 사람
+            if math.isinf(dist):
+                dist = self.stop_front   # 거리를 모름: 종류 판단용으로 멈춤 거리를 씀
+        person = blocked and self.direction == 'FORWARD' and (cam or now - self.person_t < self.person_hold)
         prev = self.cls.person_seen
         kind = self.cls.update(now, dist if blocked else None, person)
         if kind == 'PERSON' and not prev:

@@ -49,6 +49,8 @@ obstacle:
     dynamic_move_m: 0.04
     static_sec: 2.0
     person_hold_sec: 2.0         # guide 노드가 '사람 보임'을 보낸 뒤 이만큼 PERSON으로 믿음
+    camera_block: true           # guide 노드 카메라가 '바로 앞 손님'을 보면 LiDAR에 안 잡혀도 막힘 (작은 레고 사람)
+    camera_hold_sec: 1.0         # 그 결과가 이만큼 안 오면 저절로 풀림
 
 camera:
   ros__parameters:                    # camera_node: 카메라를 혼자 열고 발행 (docking · guide · detect_view가 구독)
@@ -73,3 +75,8 @@ guide:
     require_detector: false           # true = 모델 없으면 실패, false = 모델 없으면 바로 OK (시험용)
     obstacle_check: true              # 앞으로 가다 LiDAR로 막히면 YOLO로 사람인지 확인 -> /obstacle/person (막혔을 때만)
     obstacle_hz: 1.0                  # 그때 YOLO 횟수 (초당)
+    cam_block: true                   # 앞으로 가는 동안 YOLO로 바로 앞 손님을 보면 멈춤 -> /obstacle/camera
+                                      # (레고 사람은 LiDAR 높이보다 낮아 안 잡힘 -> 밀고 가던 문제)
+    cam_block_hz: 3.0                 # 앞으로 갈 때 YOLO 횟수 (초당)
+    cam_block_h: 0.35                 # 손님 박스 높이가 화면 높이의 이만큼 이상이면 '바로 앞' (멀리서 서면 키우고, 너무 붙어서 서면 줄이기)
+    cam_block_x: 0.30                 # 박스 가운데가 화면 가운데에서 화면 폭의 이만큼 안 = 가는 길 위 (옆 사람은 안 멈춤)

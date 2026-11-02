@@ -9,6 +9,8 @@
       /obstacle/status  (obstacle 노드) 앞으로 가다 막혔는지
 보냄  /guide/result   {id, ok, detail}
       /obstacle/person  std_msgs/Bool: 막혔을 때 obstacle_hz로 YOLO -> 앞에 손님(class_name)이 보이나 (obstacle_check)
+      /obstacle/camera  std_msgs/Bool: 앞으로 가는 동안 cam_block_hz로 YOLO -> 바로 앞에 손님이 있나 (cam_block)
+                        작은 레고 사람은 LiDAR에 안 잡혀 밀고 가서, 카메라로 직접 막음 (core.near_person)
 
 - YOLO는 요청을 처리하는 동안에만, infer_hz로 가장 최근 프레임 하나씩 돌린다 (CPU 아끼기, 주행 노드와 다른 프로세스)
 - confirm 번 연속으로 보이면 "찾음". wait_sec 안에 못 찾으면 ok=false (fleet_agent가 서버에 guest_lost)
@@ -21,10 +23,11 @@ import time
 import numpy as np
 import rclpy
 from rclpy.node import Node
-from rclpy.qos import QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
+from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
 from sensor_msgs.msg import CompressedImage, Image
 from std_msgs.msg import Bool, String
 
+from .core import near_person
 from .guide_effects import leds_off, play
 
 
@@ -45,6 +48,13 @@ class GuideNode(Node):
         self.welcome_first = p('welcome_on_request', True).value   # greet가 오면(테이블 선택) 바로 환영
         self.obstacle_check = p('obstacle_check', True).value       # 앞으로 가다 막히면 YOLO로 사람인지 (obstacle 노드에 알림)
         self.obstacle_hz = float(p('obstacle_hz', 1.0).value)
+        self.cam_block = p('cam_block', True).value                  # 앞으로 가는 동안 카메라로 바로 앞 손님을 보면 막음
+        self.cam_block_hz = float(p('cam_block_hz', 3.0).value)
+        self.cam_block_h = float(p('cam_block_h', 0.35).value)       # 손님 박스 높이가 화면의 이만큼 이상 = 가까움
+        self.cam_block_x = float(p('cam_block_x', 0.30).value)       # 박스 가운데가 화면 가운데에서 이 안 = 가는 길 위
+        self.direction = 'STOP'
+        self.near = None
+        self.last_blocked_check = 0.0
         self.blocked = False
         self.watching = False        # 손님 찾는 중 (그동안 장애물 확인은 쉼)
         self.person_logged = None
@@ -63,9 +73,14 @@ class GuideNode(Node):
         img_type = CompressedImage if self.compressed else Image
         self.create_subscription(img_type, self.camera_topic, self.on_image, qos_profile_sensor_data)   # camera_node = best effort
         self.person_pub = self.create_publisher(Bool, '/obstacle/person', 10)
-        if self.obstacle_check and self.model is not None:
+        self.camera_pub = self.create_publisher(Bool, '/obstacle/camera', 10)
+        if (self.obstacle_check or self.cam_block) and self.model is not None:
             self.create_subscription(String, '/obstacle/status', self.on_obstacle, 10)
-            self.create_timer(1.0 / max(0.2, self.obstacle_hz), self.check_obstacle)
+            latched = QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
+                                 durability=DurabilityPolicy.TRANSIENT_LOCAL)
+            self.create_subscription(String, '/obstacle/direction', self.on_direction, latched)
+            hz = max(self.obstacle_hz, self.cam_block_hz if self.cam_block else 0.0)
+            self.create_timer(1.0 / max(0.2, hz), self.check_obstacle)
         self.get_logger().info(f'guide 노드 시작 (카메라 {self.camera_topic}, '
                                f'{"YOLO " + self.class_name if self.model else "감지기 없음"})')
 
@@ -96,30 +111,65 @@ class GuideNode(Node):
             self.person_logged = None
         self.blocked = blocked
 
+    def on_direction(self, msg):
+        if msg.data != self.direction:
+            self.direction = msg.data
+            if self.direction != 'FORWARD' and self.near:
+                self.set_near(False)     # 앞으로 안 감: 카메라 막힘 풀기
+
+    def set_near(self, near):
+        self.camera_pub.publish(Bool(data=near))
+        if near != self.near:
+            self.near = near
+            if near or self.direction == 'FORWARD':
+                self.get_logger().info('카메라: 바로 앞에 손님 -> 멈춤' if near else '카메라: 앞에 손님 없음')
+
     def check_obstacle(self):
-        if not self.blocked or self.watching:
-            return                       # 안 막힘 · 손님 찾는 중(모델 사용 중)
+        if self.watching:
+            return                       # 손님 찾는 중(모델 사용 중)
+        fwd = self.cam_block and self.direction == 'FORWARD'
+        now = time.monotonic()
+        lidar = (self.obstacle_check and self.blocked
+                 and now - self.last_blocked_check >= 1.0 / max(0.2, self.obstacle_hz) - 0.01)
+        if not (fwd or lidar):
+            return                       # 앞으로 안 감 · 안 막힘
         with self.frame_lock:
             msg, ft = self.frame, self.frame_t
-        if msg is None or time.monotonic() - ft > 1.0:
-            return                       # 최근 프레임 없음
-        seen = self.detect(msg)
-        if seen is None:
+        if msg is None or now - ft > 1.0:
+            return                       # 최근 프레임 없음 (camera_block은 obstacle 노드에서 저절로 풀림)
+        boxes = self.persons(msg)
+        if boxes is None:
             return
-        self.person_pub.publish(Bool(data=seen))
-        if seen != getattr(self, 'person_logged', None):
-            self.person_logged = seen
-            self.get_logger().info(f'막힌 앞: {"사람(" + self.class_name + ") 보임" if seen else "사람 안 보임"}')
+        if fwd:
+            self.set_near(near_person(boxes, self.cam_block_h, self.cam_block_x))
+        if self.blocked and (lidar or fwd):
+            self.last_blocked_check = now
+            seen = bool(boxes)
+            self.person_pub.publish(Bool(data=seen))
+            if seen != getattr(self, 'person_logged', None):
+                self.person_logged = seen
+                self.get_logger().info(f'막힌 앞: {"사람(" + self.class_name + ") 보임" if seen else "사람 안 보임"}')
 
-    def detect(self, msg):
-        """프레임 하나에 class_name이 보이나 (실패하면 None)"""
+    def persons(self, msg):
+        """프레임 하나에서 class_name 박스들 [(x1, y1, x2, y2) 0~1] (실패하면 None)"""
         try:
+            img = self.to_bgr(msg)
             with self.model_lock:
-                r = self.model(self.to_bgr(msg), verbose=False, conf=self.conf)[0]
-            return r.boxes is not None and any(int(c) == self.class_id for c in r.boxes.cls.tolist())
+                r = self.model(img, verbose=False, conf=self.conf)[0]
+            if r.boxes is None:
+                return []
+            h, w = img.shape[:2]
+            return [(x1 / w, y1 / h, x2 / w, y2 / h)
+                    for (x1, y1, x2, y2), c in zip(r.boxes.xyxy.tolist(), r.boxes.cls.tolist())
+                    if int(c) == self.class_id]
         except Exception as e:  # noqa: BLE001
             self.get_logger().warn(f'YOLO 실패: {e}')
             return None
+
+    def detect(self, msg):
+        """프레임 하나에 class_name이 보이나 (실패하면 None)"""
+        boxes = self.persons(msg)
+        return None if boxes is None else bool(boxes)
 
     def on_image(self, msg):
         with self.frame_lock:
