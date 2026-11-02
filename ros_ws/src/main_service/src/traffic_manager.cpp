@@ -120,9 +120,31 @@ bool TrafficManager::setGoal(const std::string& id, const std::string& node, boo
   r.face_node = map_.node(face_node) ? face_node : "";
   dropReservedExit(r);
   logLine("TRAFFIC", id + " 목적지 " + node + (guide ? " (안내)" : ""));
+  cutCommittedAt(r, node);       // 새 목적지가 이미 보낸 길 위면 그 뒤(예: 도크)는 버림 (목적지 · 바라볼 곳을 정한 뒤 다시 보냄)
   checkArrival(r);              // 이미 거기 있으면 바로 도착
   if (!r.goal.empty()) tryExtend(r);
   return true;
+}
+
+// 새 목적지가 이미 보낸 길(committed) 중간에 있으면 그 뒤 칸을 버리고 [.., 목적지]를 REPLACE로 다시 보낸다.
+// 예: D1로 돌아가며 [N1, D1]을 보낸 로봇에게 다음 안내(N1)를 주면 D1까지 들어가 도킹했다 나오지 않고 N1에서 섬.
+// 로봇이 이미 목적지에 닿은 뒤(보낸 칸이 도크 하나만 남음)는 못 되돌리고 그대로 (로봇이 도킹 중 끊기를 처리)
+void TrafficManager::cutCommittedAt(Robot& r, const std::string& node) {
+  auto it = std::find(r.committed.begin(), r.committed.end(), node);
+  if (it == r.committed.end() || it + 1 == r.committed.end()) return;
+  std::vector<std::string> drop(it + 1, r.committed.end());
+  std::string prev = node;
+  for (const std::string& n : drop) {
+    if (!contains(std::vector<std::string>(r.committed.begin(), it + 1), n)) releaseLock(n, r.id);
+    auto e = edge_lock_.find(edgeKey(prev, n));
+    if (e != edge_lock_.end() && e->second == r.id) edge_lock_.erase(e);
+    prev = n;
+  }
+  r.committed.erase(it + 1, r.committed.end());
+  dropReservedExit(r);
+  r.cmd_active = false;  // 로봇이 들고 있는 뒤 칸(도크)을 버리게 REPLACE
+  publish(r, r.committed, false);
+  logLine("TRAFFIC", r.id + " 보낸 길을 " + node + "에서 끊음 (버림: " + join(drop) + ")");
 }
 
 void TrafficManager::dropReservedExit(Robot& r) {

@@ -122,6 +122,7 @@ class TrafficManager {
   };
 
   std::string lastSent(const Robot& r) const;
+  void cutCommittedAt(Robot& r, const std::string& node);   // 새 목적지가 보낸 길 중간이면 그 뒤를 버리고 다시 보냄
   std::set<std::string> baseBan(const Robot& r) const;  // 경로 계산에서 늘 빼는 노드 (우회 중 · 테이블 들어온 노드)
   std::string tableExit(const Robot& r, const std::vector<std::string>& seg) const;  // 테이블로 들어가는 칸이면 나갈 칸
   void dropReservedExit(Robot& r);
