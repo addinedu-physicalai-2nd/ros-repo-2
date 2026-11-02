@@ -27,7 +27,7 @@ from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy, qos_profi
 from sensor_msgs.msg import CompressedImage, Image
 from std_msgs.msg import Bool, String
 
-from .core import near_person
+from .core import near_box
 from .guide_effects import leds_off, play
 
 
@@ -49,8 +49,11 @@ class GuideNode(Node):
         self.obstacle_check = p('obstacle_check', True).value       # 앞으로 가다 막히면 YOLO로 사람인지 (obstacle 노드에 알림)
         self.obstacle_hz = float(p('obstacle_hz', 1.0).value)
         self.cam_block = p('cam_block', True).value                  # 앞으로 가는 동안 카메라로 바로 앞 손님을 보면 막음
-        self.cam_block_hz = float(p('cam_block_hz', 3.0).value)
-        self.cam_block_h = float(p('cam_block_h', 0.35).value)       # 손님 박스 높이가 화면의 이만큼 이상 = 가까움
+        self.cam_block_hz = float(p('cam_block_hz', 4.0).value)
+        self.cam_block_h = float(p('cam_block_h', 0.20).value)       # 손님 박스 높이가 화면의 이만큼 이상 = 가까움
+        self.cam_block_bottom = float(p('cam_block_bottom', 0.85).value)   # 또는 박스 아래끝이 화면의 이만큼 아래 = 바로 앞 바닥
+        self.cam_clear_n = int(p('cam_clear_n', 2).value)            # 연속 이만큼 안 보여야 멈춤을 풂 (YOLO가 한 장 놓쳐도 출발 안 하게)
+        self.clear_count = 0
         self.cam_block_x = float(p('cam_block_x', 0.30).value)       # 박스 가운데가 화면 가운데에서 이 안 = 가는 길 위
         self.direction = 'STOP'
         self.near = None
@@ -115,14 +118,26 @@ class GuideNode(Node):
         if msg.data != self.direction:
             self.direction = msg.data
             if self.direction != 'FORWARD' and self.near:
+                self.clear_count = self.cam_clear_n
                 self.set_near(False)     # 앞으로 안 감: 카메라 막힘 풀기
 
-    def set_near(self, near):
+    def set_near(self, near, box=None):
+        """주행 중 YOLO 결과 -> /obstacle/camera. 보이면 바로 멈춤, 풀 때는 cam_clear_n번 연속 안 보여야 (깜빡임에 출발 안 함)"""
+        if near:
+            self.clear_count = 0
+        elif self.near:
+            self.clear_count += 1
+            if self.clear_count < self.cam_clear_n:
+                near = True              # 아직 멈춤 유지
         self.camera_pub.publish(Bool(data=near))
         if near != self.near:
             self.near = near
-            if near or self.direction == 'FORWARD':
-                self.get_logger().info('카메라: 바로 앞에 손님 -> 멈춤' if near else '카메라: 앞에 손님 없음')
+            if near:
+                info = (f' (박스 높이 {box[3] - box[1]:.2f}, 아래끝 {box[3]:.2f}, 가운데 {(box[0] + box[2]) / 2:.2f})'
+                        if box else '')
+                self.get_logger().info('카메라: 앞에 손님 -> 멈춤' + info)
+            elif self.direction == 'FORWARD':
+                self.get_logger().info('카메라: 앞에 손님 없음 -> 풂')
 
     def check_obstacle(self):
         if self.watching:
@@ -141,7 +156,8 @@ class GuideNode(Node):
         if boxes is None:
             return
         if fwd:
-            self.set_near(near_person(boxes, self.cam_block_h, self.cam_block_x))
+            box = near_box(boxes, self.cam_block_h, self.cam_block_x, self.cam_block_bottom)
+            self.set_near(box is not None, box)
         if self.blocked and (lidar or fwd):
             self.last_blocked_check = now
             seen = bool(boxes)

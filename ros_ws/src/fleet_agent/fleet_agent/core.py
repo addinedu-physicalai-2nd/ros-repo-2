@@ -188,15 +188,23 @@ class ObstacleClass:
         return 'UNKNOWN'
 
 
-def near_person(boxes, min_h=0.35, x_band=0.30):
-    """카메라로 본 손님 박스 중 '바로 앞에 있다'가 있나 (LiDAR에 안 잡히는 작은 레고 사람용)
+def near_box(boxes, min_h=0.20, x_band=0.30, bottom=0.85):
+    """카메라로 본 손님 박스 중 '가는 길 위 가까이' 있는 것 (없으면 None). 주행 중 YOLO 멈춤 판단 (LiDAR보다 먼저)
     boxes = [(x1, y1, x2, y2), ...] 화면 크기로 나눈 0~1 값
-    - 박스 높이가 화면의 min_h 이상 = 가까움 (멀리 있는 손님 · 테이블 옆 인형은 작게 보임)
-    - 박스 가운데가 화면 가운데에서 x_band 안 = 가는 길 위 (옆으로 비켜 선 사람은 안 막음)"""
-    for x1, y1, x2, y2 in boxes:
-        if y2 - y1 >= min_h and abs((x1 + x2) / 2 - 0.5) <= x_band:
-            return True
-    return False
+    - 박스 가운데가 화면 가운데에서 x_band 안 = 가는 길 위 (옆으로 비켜 선 사람은 안 막음)
+    - 그리고 가까움: 박스 높이가 화면의 min_h 이상, 또는 박스 아래끝이 화면 bottom 아래
+      (작은 레고 사람은 가까워져도 박스가 작고, 바닥에 있어 가까울수록 화면 아래로 내려감 -> 아래끝으로도 잡음.
+       멀리 선 사람은 발이 화면 가운데쯤이라 안 걸림)"""
+    for b in boxes:
+        x1, y1, x2, y2 = b
+        if abs((x1 + x2) / 2 - 0.5) <= x_band and (y2 - y1 >= min_h or y2 >= bottom):
+            return b
+    return None
+
+
+def near_person(boxes, min_h=0.20, x_band=0.30, bottom=0.85):
+    """가는 길 위 가까이에 손님이 있나 (near_box가 있나)"""
+    return near_box(boxes, min_h, x_band, bottom) is not None
 
 
 class CameraBlock:
