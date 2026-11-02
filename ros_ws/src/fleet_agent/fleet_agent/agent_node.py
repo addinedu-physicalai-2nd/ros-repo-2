@@ -277,6 +277,9 @@ class FleetAgent(Node):
             return
         if r.get('id') != self.dock_req_id:
             return
+        if r.get('stage') == 'in_pocket':      # 도크 칸 쪽으로 돌아 후면 주차 시작
+            self.driver.on_precision_pocket(r.get('node', ''))
+            return
         self.driver.on_precision_progress(r.get('node', ''))
 
     def on_dock_result(self, msg):

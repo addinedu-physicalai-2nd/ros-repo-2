@@ -9,7 +9,8 @@ docking 노드가 부른다:  undock(node, pub, cancelled, tf_buf, cam, req) -> 
                없으면 정렬 생략
 
 순서 (멈춰 재고 odom으로 움직임, 카메라는 docking 노드가 열어 둔 것을 씀)
-  1. 도크에서 마커를 한 번 잼. 멀면(22 cm+) 각도는 안 믿고 로봇이 벽을 정면으로 본다고 봄 (도킹 직후라)
+  1. 도크에서 마커를 한 번 잼. 벽 방향은 라이다 앞 벽 (lidar를 주면). 라이다가 없거나 벽이 안 잡히면 예전처럼:
+     멀면(22 cm+) 각도는 안 믿고 로봇이 벽을 정면으로 본다고 봄 (도킹 직후라), 가까우면 마커 기울기
   2. 나올 자리까지 한 번에 (가감속, 곡선) -> 마커를 정면으로 보고 다시 잼 -> 앞뒤 1 cm 넘게 어긋나면 고침
   3. turn_deg 회전 (나올 자리 방향 맞추기와 합쳐 회전 한 번)
   4. 정렬 마커의 '방위각'(화면 어느 쪽에 보이나)만 보고 제자리 회전. 멀어도 0.1° 수준으로 안정적
@@ -72,7 +73,7 @@ def _go_to(mv, x, y, vmax):
     mv.stop()
 
 
-def undock(node, pub, cancelled, tf_buf, cam, req):
+def undock(node, pub, cancelled, tf_buf, cam, req, lidar=None):
     log = node.get_logger().info
     mv = Motion(node, pub, cancelled, tf_buf, None, dict(DEFAULTS))
     mv.dk.wait_pose()
@@ -85,11 +86,16 @@ def undock(node, pub, cancelled, tf_buf, cam, req):
         _set_size(0.025)
         cam.id = marker
         mv.stop(0.15)
+        # 벽 방향은 라이다 앞 벽 (주차 중에 끊겨 비스듬히 서 있거나 마커가 가까워 기울기가 튀어도 곧게 나옴)
+        from .corridor import measure_wall_phi
+        phi_w = measure_wall_phi(lidar, mv.dk.pose, log, 'undock 벽 방향')
         m = cam.measure_stable(frames=FRAMES)
         if m is None:
             return f'실패: 도크 마커 {marker}가 안 보임'
         p = mv.dk.pose()
         D, phi = _dock_est(m, p)
+        if phi_w is not None:
+            phi = phi_w
         goal = md.dock_to_odom(D, phi, g['gx'], g['gy'], g['gth'])
         log(f'[undock] 마커 {m["tz"] * 100:.1f} cm -> {req["target"]}까지 '
             f'{math.hypot(goal[0] - p[0], goal[1] - p[1]) * 100:.1f} cm')
@@ -101,6 +107,8 @@ def undock(node, pub, cancelled, tf_buf, cam, req):
         if m2 is not None:
             p2 = mv.dk.pose()
             D2, phi2 = _dock_est(m2, p2)
+            if phi_w is not None:
+                phi2 = phi_w
             goal2 = md.dock_to_odom(D2, phi2, g['gx'], g['gy'], g['gth'])
             fwd = (goal2[0] - p2[0]) * math.cos(p2[2]) + (goal2[1] - p2[1]) * math.sin(p2[2])
             log(f'[undock] 도착 확인: 앞뒤 {fwd * 1000:+.0f} mm')

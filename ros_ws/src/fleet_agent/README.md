@@ -156,8 +156,8 @@ ros2 launch fleet_agent robot_system.launch.xml robot_id:=pinky2 start_node:=D3 
 
 ```
 N2 ─Nav2─▶ N1 ─(D1 쪽을 봄)─ entrance: 통로 가운데로 남쪽 → 칸막이 시작 + 기록 거리 → 마커 6 거리
-                             → 우90, 앞 벽(라이다) 수직 → 마커 1 = 교점 기록 → 곧게 후진, 마커 1 거리 = D1 ─▶ DOCKED · CMD_DONE
-D1 ─ entrance_exit: 곧게 앞으로 교점 → 마커 1 = 기록 → 우90 북쪽 (통로 벽 평행) ─▶ UNDOCKED ─▶ (안내면 여기서 인사) ─Nav2─▶ N1 ...
+                             → 우90, 앞 벽(라이다) 수직 → 후면 주차 (D2 · D3와 같은 park, 마커 1, d1line → d1) ─▶ DOCKED · CMD_DONE
+D1 ─ entrance_exit: 앞 벽 수직(라이다) → 곧게 앞으로 교점 → 마커 1 = 기록 → 우90 북쪽 (통로 벽 평행) ─▶ UNDOCKED ─▶ (안내면 여기서 인사) ─Nav2─▶ N1 ...
 ```
 - 교점 = D1에서 곧게 나온 줄 × 남쪽을 볼 때 마커 6이 정면인 줄. 서쪽을 볼 때 방향은 앞 벽을 라이다로 직선 맞춤
   (odom 90° 회전이 몇 ° 틀려서, 마커 1을 정면에 둬도 로봇 중심이 2 cm 비껴 섰음), 남 · 북을 볼 때는 양옆 벽
@@ -168,6 +168,18 @@ D1 ─ entrance_exit: 곧게 앞으로 교점 → 마커 1 = 기록 → 우90 �
 ros2 run fleet_agent dock_record d1            # D1 · 교점(마커 1 · 6) · N1 -> ~/align_d1s.json 등. 끝: N1에서 남쪽
 ros2 run fleet_agent dock_record check --dock d1
 ```
+
+## 도킹 중 새 명령 (D1 · D2 · D3)
+
+후면 주차(`Steps.park`)를 시작하면(= 도크 칸 쪽으로 돌았으면) docking이 `/docking/progress`에 `stage: in_pocket`을 보낸다.
+그 뒤에 새 명령이 오면 fleet_agent는 도킹을 끊고 **빠지기(leave)부터** 한다 (칸 안에서 Nav2로 바로 나가면 벽 · 칸막이에 걸림).
+- 서버 '도킹 복귀 중 이어받기'(도크 뒤에 새 길 APPEND): 도크를 지나간 노드로 치고(NODE_REACHED) → 빠지기 → 새 길.
+  예전에는 도킹을 끝까지 한 뒤 빠졌다
+- REPLACE · 취소(CANCEL): 다음 출발 때 빠지기부터
+- 칸 쪽으로 돌기 전(통로 · 교점)에 끊기면 예전처럼 바로 출발
+- 빠지기 요청에는 `preempt: true`가 붙는다. docking은 끊긴 도킹이 멈추는 대로 빠지기를 시작한다
+  (cancel · request가 다른 토픽이라 순서가 바뀌어 와도 됨)
+- 빠지기(undock · entrance_exit)는 시작할 때 라이다로 앞 벽 방향을 잰다 (주차 중에 끊겨 비스듬히 서 있어도 곧게 나옴)
 
 ## 도킹 알림 (fleet_msgs v10)
 

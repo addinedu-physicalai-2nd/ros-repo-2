@@ -178,12 +178,37 @@ def side_lines(pts, along=0.30, near=0.05, far=0.45):
     return out
 
 
+def measure_wall_phi(lidar, pose, log, tag, secs=1.0):
+    """멈춘 채 앞 벽(도크 마커 벽)을 라이다로 직선 맞춤 -> 벽 법선 phi (odom, 벽 -> 로봇 쪽). 안 보이면 None
+    pose() -> 지금 odom 자세. Steps.wall_phi · undock이 같이 씀"""
+    if lidar is None:
+        return None
+    import time
+    from .entrance import front_wall
+    acc, t_end = [], time.time() + secs
+    while time.time() < t_end:
+        pts = lidar.take()
+        if pts is not None:
+            r = front_wall(pts)
+            if r is not None:
+                acc.append(md.wrap(pose()[2] - r[1] + math.pi))
+        time.sleep(0.03)
+    if len(acc) < 3:
+        log(f'[{tag}] 앞 벽이 라이다에 안 잡힘 -> 마커 기울기로')
+        return None
+    phi = math.atan2(float(np.mean(np.sin(acc))), float(np.mean(np.cos(acc))))
+    off = md.wrap(pose()[2] - md.wrap(phi + math.pi))
+    log(f'[{tag}] 라이다 앞 벽: 로봇이 벽 수직에서 {math.degrees(off):+.1f}° ({len(acc)}번 잼)')
+    return phi
+
+
 class Steps:
     """마커 · 라이다 · 바닥 센서로 하는 정밀 동작 모음. 움직임은 odom (Motion), 마커는 멈춰서 잼"""
 
     def __init__(self, mv, cam, log, lidar=None):
         self.mv, self.cam, self.log = mv, cam, log
         self.lidar = lidar
+        self.on_pocket = None     # docking 노드가 넣음: 도크 칸 쪽으로 돌아 후면 주차를 시작할 때 부름 (끊기면 빠지기부터)
         mv.dk.cam = cam
 
     def see(self, mid, size, frames=FRAMES, find=False):
@@ -204,25 +229,7 @@ class Steps:
         """앞 벽(도크 마커가 붙은 벽)을 라이다로 직선 맞춤 -> 벽 법선 phi (odom, 벽 -> 로봇 쪽). 안 보이면 None
         2.5 cm 마커 기울기는 15~20 cm에서도 몇 °씩 튀고 부호까지 뒤집혀서 (D3 실측 -4.1° -> +5.7° -> -9.0°)
         줄 방향은 벽으로 잡는다 (D1과 같은 방식). 멈춘 채 secs초 동안 잰 값의 평균"""
-        if self.lidar is None:
-            return None
-        import time
-        from .entrance import front_wall
-        acc, t_end = [], time.time() + secs
-        while time.time() < t_end:
-            pts = self.lidar.take()
-            if pts is not None:
-                r = front_wall(pts)
-                if r is not None:
-                    acc.append(md.wrap(self.mv.dk.pose()[2] - r[1] + math.pi))
-            time.sleep(0.03)
-        if len(acc) < 3:
-            self.log(f'[{tag}] 앞 벽이 라이다에 안 잡힘 -> 마커 기울기로')
-            return None
-        phi = math.atan2(float(np.mean(np.sin(acc))), float(np.mean(np.cos(acc))))
-        off = md.wrap(self.mv.dk.pose()[2] - md.wrap(phi + math.pi))
-        self.log(f'[{tag}] 라이다 앞 벽: 로봇이 벽 수직에서 {math.degrees(off):+.1f}° ({len(acc)}번 잼)')
-        return phi
+        return measure_wall_phi(self.lidar, self.mv.dk.pose, self.log, tag, secs)
 
     @staticmethod
     def _rel(p, goal, phi):
@@ -321,6 +328,8 @@ class Steps:
         - 줄에서 옆으로 벗어난 만큼만 아주 살짝 기움 (최대 PARK_STEER_DEG, 회전 속도 PARK_W_MAX 제한) -> 크게 안 틈
         - 끝: 멈춰서 정답 자세와 비교, 앞뒤 · 방향 마무리"""
         import time
+        if self.on_pocket is not None:                # 이제 칸 안 (칸 쪽을 봄): 여기서 끊기면 빠지기(leave)부터
+            self.on_pocket()
         if phi is None:                               # D2 · D3: 줄 방향은 라이다 앞 벽 (안 보이면 예전처럼 마커 기울기)
             phi = self.wall_phi(f'{name} 벽 방향')
         D, phi = self.match(marker, stop_rec, f'{name} 맞추기', phi_fixed=phi)

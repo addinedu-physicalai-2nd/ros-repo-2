@@ -892,6 +892,120 @@ def test_entrance_d1_append_while_docking_then_exit():
     assert reached(r) == ['N1', 'D1', 'N1']
 
 
+
+def _d1_docking_then(r, d, cmd, signal_pocket, action):
+    """N2 -> N1 -> D1 입구 도킹 중 (결과를 늦게), 원하면 '칸 안' 신호를 준 뒤 action(d) (새 명령 · 취소)"""
+    r.prec_delay = 200
+    d.on_move(cmd, False, FORWARD, [('N1',) + N1 + (math.pi,)], False, 'D1')
+    d.on_move(cmd, True, REVERSE, [('D1',) + D1 + (0.069,)], False, 'D1')
+    done = {'v': False}
+
+    def hook(t):
+        if not done['v'] and r.prec == ['D1:entrance'] and r.prec_pending:
+            done['v'] = True
+            if signal_pocket:
+                d.on_precision_pocket('D1')
+            r.prec_delay = 0
+            action(d)
+    return hook
+
+
+def test_entrance_d1_replace_in_pocket_leaves_first():
+    # D1 칸 안(후면 주차 중)에서 새 일(REPLACE) -> 도킹 끊고 entrance_exit(빠지기)부터 -> UNDOCKED -> Nav2로 새 일
+    r, d = make(*N2, math.pi, last_drive=FORWARD)
+    d.stops = ENT_STOPS
+    hook = _d1_docking_then(r, d, 93, True, lambda d_: d_.on_move(94, False, FORWARD, [('N2',) + N2 + (math.pi,)],
+                                                                  False, 'N2'))
+    run(r, d, 40, hook=hook)
+    assert r.prec == ['D1:entrance', 'D1:entrance_exit']
+    assert r.prec_cancelled == 1                               # 도킹은 끊음
+    ev = [(t, n) for t, n, _ in r.events]
+    assert (DOCKED, 'D1') not in ev and (UNDOCKED, 'D1') in ev
+    assert reached(r)[-1] == 'N2' and d.pocket == ''
+
+
+def test_entrance_d1_replace_before_pocket_goes_directly():
+    # 아직 칸 쪽으로 돌기 전(통로)에 새 일 -> 예전처럼 빠지기 없이 바로 출발
+    r, d = make(*N2, math.pi, last_drive=FORWARD)
+    d.stops = ENT_STOPS
+    hook = _d1_docking_then(r, d, 95, False, lambda d_: d_.on_move(96, False, FORWARD, [('N2',) + N2 + (math.pi,)],
+                                                                   False, 'N2'))
+    run(r, d, 40, hook=hook)
+    assert r.prec == ['D1:entrance']
+    assert reached(r)[-1] == 'N2'
+
+
+def test_entrance_d1_cancel_in_pocket_then_move_leaves_first():
+    # 칸 안에서 취소(CANCEL) -> 그 자리에 섬 -> 나중에 새 일이 오면 빠지기부터
+    r, d = make(*N2, math.pi, last_drive=FORWARD)
+    d.stops = ENT_STOPS
+    hook = _d1_docking_then(r, d, 97, True, lambda d_: d_.on_control(CANCEL))
+    t = run(r, d, 10, hook=hook)
+    assert d.leave_from == 'D1' and r.prec == ['D1:entrance']
+    d.on_move(98, False, FORWARD, [('N2',) + N2 + (math.pi,)], False, 'N2')
+    run(r, d, 30, t0=t)
+    assert r.prec == ['D1:entrance', 'D1:entrance_exit']
+
+
+def test_pocket_cleared_when_docking_finishes():
+    # 칸 안 신호 뒤 도킹이 끝까지 됨 -> 평소처럼 DOCKED · CMD_DONE, 다음 출발은 원래 leave_from 그대로
+    r, d = make(*N2, math.pi, last_drive=FORWARD)
+    d.stops = ENT_STOPS
+    hook = _d1_docking_then(r, d, 99, True, lambda d_: None)
+    run(r, d, 40, hook=hook)
+    assert d.pocket == '' and d.leave_from == 'D1'
+    ev = [(t, n) for t, n, _ in r.events]
+    assert ev[-2:] == [(DOCKED, 'D1'), (CMD_DONE, 'D1')]
+
+
+def test_pocket_ignored_without_leave_or_not_running():
+    # leave가 없는 노드 · 정밀 정차 중이 아닐 때 온 신호는 무시
+    r, d = make(*N2, math.pi)
+    d.stops = ENT_STOPS
+    d.on_precision_pocket('D1')
+    assert d.pocket == ''
+    d.prec_state = 'running'
+    d.on_precision_pocket('N1')
+    assert d.pocket == ''
+
+
+def test_entrance_d1_append_in_pocket_cuts_and_leaves():
+    # 칸 안(후면 주차 중)에서 서버 '이어받기' APPEND (도크 뒤에 새 길) -> 도킹 끝까지 안 하고 바로 끊고 빠지기
+    r, d = make(*N2, math.pi, last_drive=FORWARD)
+    d.stops = ENT_STOPS
+    reqs, orig = [], r.precision
+    r.precision = lambda req: (reqs.append(dict(req)), orig(req))
+    hook = _d1_docking_then(r, d, 100, True, lambda d_: d_.on_move(100, True, FORWARD, [('N1',) + N1 + (math.pi,)],
+                                                                   False, 'P1'))
+    run(r, d, 40, hook=hook)
+    assert r.prec == ['D1:entrance', 'D1:entrance_exit'] and r.prec_cancelled == 1
+    assert reqs[1].get('preempt') is True                     # docking: 앞 일(entrance)이 멈추면 바로 시작
+    ev = [(t, n) for t, n, _ in r.events]
+    assert (DOCKED, 'D1') not in ev and (UNDOCKED, 'D1') in ev
+    assert reached(r) == ['N1', 'D1', 'N1']
+
+
+def test_corridor_d3_append_in_pocket_cuts_and_undocks():
+    # 통로로 D3 도킹 중 칸 안(dock_in 후면 주차)에서 APPEND -> 끊고 D3 지남 -> undock(to N15, preempt)
+    r, d = corr_make()
+    d.on_move(101, False, FORWARD, wp('N14', yaw=0.0), False, 'D3')
+    d.on_move(101, True, REVERSE, wp('N15'), False, 'D3')
+    srv = server(r, d, 101, 'D3')
+    st = {'done': False}
+
+    def hook(t):
+        srv(t)
+        if not st['done'] and r.corr and r.corr['final'] is not None:
+            st['done'] = True
+            d.on_precision_pocket('D3')
+            d.on_move(101, True, FORWARD, wp('N15', yaw=1.5708), False, 'N15')
+    run(r, d, 40, hook=hook)
+    assert r.prec[:3] == ['N14:align', 'D3:corridor', 'D3:undock']
+    assert r.reqs[2]['method'] == 'undock' and r.reqs[2].get('preempt') is True
+    assert reached(r)[:4] == ['N14', 'N15', 'D3', 'N15']
+    ev = [(t, n) for t, n, _ in r.events]
+    assert (DOCKED, 'D3') not in ev and (UNDOCKED, 'D3') in ev
+
 def test_localize_fwd_spin_back_then_event():
     # Control LOCALIZE: 앞으로 0.15 m -> 360° -> 처음 방향 -> 뒤로 0.15 m (원래 자리) -> LOCALIZED
     r, d = make(1.0, 1.0, 0.0)

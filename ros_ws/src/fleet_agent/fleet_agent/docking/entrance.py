@@ -7,9 +7,9 @@
   record (D1에 손으로 반듯하게, 앞 = 마커 1, 바구니 = 칸막이):
         D1 기록 -> 곧게 앞으로 -> 좌90 마커 6 정면 맞춤(교점) -> 우90 교점 기록(마커 1) -> 좌90 교점 기록(마커 6 · 벽)
         -> 가운데로 북쪽 후진, 칸막이 끝 = N1 기록. 끝: N1에서 남쪽을 봄
-  dock   (N1에서 D1 쪽을 보고): 가운데로 칸막이 시작 + 기록 거리 -> 마커 6 거리 -> 우90 벽 수직
-        -> 마커 1 = 교점 기록 -> 곧게 후진, 마커 1 거리 = D1 기록
-  undock (D1): 마커 1 거리로 곧게 앞으로 교점 -> [우로 450° 이어서 회전 = 우90 + 한 바퀴, AMCL] -> 통로 벽과 평행 북쪽
+  dock   (N1에서 D1 쪽을 보고): 가운데로 칸막이 시작 + 기록 거리 -> 마커 6 거리 -> 우90 벽 수직(라이다)
+        -> 후면 주차 (Steps.park, 마커 1, d1line -> d1, 줄 방향 = 라이다 앞 벽). 위치 맞추기 뒤 다시 주차(redock)와 같음
+  undock (D1): 앞 벽 수직(라이다) -> 마커 1 거리로 곧게 앞으로 교점 -> [우로 450° 이어서 회전 = 우90 + 한 바퀴, AMCL] -> 통로 벽과 평행 북쪽
         (그다음 fleet_agent가 Nav2로 N1). 마커 6 · 남쪽은 안 봄 (그건 dock / record)
 기록 파일: ~/align_d1s.json (주로) · ~/dock_target_d1.json · ~/dock_target_d1line.json
 """
@@ -363,9 +363,12 @@ class Entrance(Steps):
             self.mv.move_along(e, h)
             self.mv.dk.rotate_to(h)
         h, ws = self.wall_heading('교점 벽 방향')
-        h_w, moved, m = self.to_golden(h, '교점', rec.get('line_side', 0.0))   # 우90, 벽 수직, 마커 1 = 기록
-        m = self.back_to(rec['d1_tz'], h_w, 'D1로 후진')
-        self.front_square('D1 벽 수직 확인')
+        # 교점에서 우90 -> 앞 벽 수직(라이다) -> 위치 맞추기 뒤 다시 주차와 같은 후면 주차 (마커 1, d1line -> d1)
+        # 예전: 남쪽으로 돌아 옆걸음(to_golden) -> 멈춰 재며 곧게 후진(back_to) -> 벽 수직 확인. 느려서 park로 바꿈
+        self.turn(-90.0, '교점 우90')
+        h_w = self.front_square('교점 벽 수직')
+        self.park(1, _load('~/dock_target_d1line.json'), _load('~/dock_target_d1.json'), 'D1',
+                  phi=md.wrap(h_w + math.pi))
         m = self.see(1, 0.025, frames=15)
         if m is not None:
             self.log(f'[D1 끝] 기록과: 앞뒤 {(m["tz"] - rec["d1_tz"]) * 1000:+.0f} mm, 옆 {(m["tx"] - rec["d1_tx"]) * 1000:+.0f} mm')
@@ -376,7 +379,8 @@ class Entrance(Steps):
         -> 그대로 Nav2. v3: 벽 수직 · 옆 확인/보정 · 회전 뒤 벽 평행을 모두 뺌 (D1 주차가 이미 벽에 맞춰져 있음, 옆은 redock에서)"""
         rec = _load('~/align_d1s.json')
         t0 = time.time()
-        h_w = self.mv.dk.pose()[2]
+        # 앞 벽 수직부터 (라이다): 주차 중에 끊겨 비스듬히 서 있어도 곧게 나옴. 이미 수직이면 1초 재고 끝
+        h_w = self.front_square('빠지기 벽 수직')
         m = self.back_to(rec['line_tz'], h_w, '교점으로 전진')
         if m is not None:
             self.log(f'[교점] 마커 1 옆 기록과 {(m["tx"] - rec.get("line_tx", m["tx"])) * 1000:+.0f} mm (확인만)')

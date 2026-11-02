@@ -356,6 +356,8 @@ class Driver:
         self.entrance_turn = False    # entrance: D1 쪽으로 돌고 나서 맡김
         self.greet_after_leave = False  # 안내 첫 출발이 도크에서: leave 끝나고 인사
         self._last_pose = (0.0, 0.0, 0.0)
+        self.pocket = ''              # 도킹이 칸 안에 들어간 도크 (docking in_pocket). 이때 끊기면 빠지기(leave)부터
+        self.leave_preempt = False    # 끊긴 도킹 뒤의 leave: docking에 '앞 일이 멈추면 시작'(preempt)으로 보냄
 
     # ------------------------------------------------------------ 입력
     def on_move(self, cmd_id, append, drive, waypoints, guide=False, goal=''):
@@ -366,6 +368,7 @@ class Driver:
                 self.io.guide({'action': 'end', 'node': self.last_node})   # 안내 끝: LED 끄기
             self.in_guide = False     # 안내가 끝났다 (복귀 · 서빙)
         if not append:  # REPLACE: 지금 가던 것까지 버리고 새로
+            self._pocket_to_leave('새 명령')
             if self.loc is not None:
                 self._localize_end('replaced')
             if self.phase == 'leave' and self.leave_req:
@@ -381,6 +384,11 @@ class Driver:
             return
         if not self.queue.apply(cmd_id, True, drive, waypoints, guide, goal):
             self.io.log(f'다른 명령({cmd_id})에 붙이는 APPEND 무시 (지금 {self.queue.cmd_id})')
+            return
+        if self.pocket and len(self.queue):
+            # 칸 안에서 길이 더 옴 (서버 '도킹 복귀 중 이어받기'는 도크 뒤에 새 길을 APPEND)
+            # 예전: 도킹을 끝까지 하고 -> 지나가는 노드로 빠지기. 이제: 바로 끊고 빠지기
+            self._cut_docking_on_append()
             return
         if self.phase == 'corridor_approach' and self.prec_state == 'running' and self.handover_req:
             self._corridor_extend()
@@ -406,6 +414,7 @@ class Driver:
             self.error = False
             self._resume()
         elif cmd == CANCEL:
+            self._pocket_to_leave('취소')
             self._stop_motion()
             self.in_guide = False
             self.greet_after_leave = False
@@ -425,6 +434,7 @@ class Driver:
                           'entrance_approach', 'localize') \
                 and self.prec_state == 'running':
             self.prec_state = 'ok'
+            self.pocket = ''          # 도킹(다시 주차)이 끝남: 다 들어갔으면 평소처럼 CMD_DONE 뒤 leave_from
             self.prec_ok = ok
             self.prec_info = dict(info or {})
             self.prec_result = detail     # 통로: ok여도 'timeout...'이면 실패로 봄
@@ -435,6 +445,40 @@ class Driver:
             elif not ok:
                 self.io.log(f'정밀 정차 실패, Nav2 위치로 진행: {detail}')
                 self.prec_detail = f'{self.cur.node_id if self.cur else ""}:{detail}'
+
+    def on_precision_pocket(self, node):
+        """docking이 도크 칸 쪽으로 돌아 후면 주차를 시작함 (D1 · D2 · D3 도킹, 위치 맞추기 다시 주차)
+        -> 이 뒤 새 명령(REPLACE) · 취소가 오면 도킹을 끊고 빠지기(leave)부터 (칸 안에서 Nav2로 바로 나가지 않게)"""
+        if self.prec_state == 'running' and (self.stops.get(node, {}) or {}).get('leave'):
+            self.pocket = node
+            self.io.log(f'{node}: 칸 안 (끊기면 빠지기부터)')
+
+    def _cut_docking_on_append(self):
+        """칸 안 도킹 중 APPEND: 도킹을 끊고 도크를 지나간 노드로 친 뒤(NODE_REACHED) 다음 출발에서 빠지기(leave)부터"""
+        node = self.pocket
+        self.io.log(f'{node} 칸 안에서 길이 더 옴 -> 도킹 끊고 빠지기(leave)부터')
+        self.io.precision_cancel()
+        self.prec_state = ''
+        if self.phase == 'corridor_approach' and self.handover:
+            steps, self.handover, self.handover_req = self.handover, [], None
+            for st in steps[:-1]:          # progress가 아직 안 온 지나온 노드
+                self._pass_step(st)
+            self.cur = steps[-1]
+        elif self.phase == 'entrance_approach':
+            self.entrance_req = None
+        self.pocket = ''
+        self._mark_leave(node)
+        self.leave_preempt = True
+        self._reached(self._last_pose)
+
+    def _pocket_to_leave(self, why):
+        """칸 안에서 도킹이 끊김 -> 다음 출발 때 그 도크의 leave부터 (undock · entrance_exit: 마커 · 라이다로 나갈 자리까지)"""
+        if not self.pocket:
+            return
+        self.leave_from = self.pocket
+        self.leave_preempt = True
+        self.io.log(f'{self.pocket} 도킹 중 {why} -> 도킹 끊고 빠지기(leave)부터')
+        self.pocket = ''
 
     def on_precision_progress(self, node):
         """통로 docking이 노드를 지남 (가로선 · 거리) -> NODE_REACHED, 멈추지 않음. 마지막 노드는 결과로"""
@@ -681,6 +725,9 @@ class Driver:
         leave = self.stops.get(self.leave_from, {}).get('leave') if self.leave_from else None
         if leave:  # 이 노드를 떠날 때 할 정밀 동작 (언도킹 · 테이프 빼기)
             self.leave_req = dict(leave, node=self.leave_from)
+            if self.leave_preempt:            # 칸 안에서 끊긴 도킹이 아직 멈추는 중일 수 있음
+                self.leave_req['preempt'] = True
+                self.leave_preempt = False
             self.leave_from = ''
             self.phase = 'leave'
             self.prec_state = 'running'

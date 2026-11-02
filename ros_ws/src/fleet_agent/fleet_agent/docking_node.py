@@ -5,7 +5,10 @@ fleet_agent <-> docking 인터페이스 (std_msgs/String, JSON)
                     fleet_agent가 붙이는 값: from_node, corridor는 nodes · then (아래)
   /docking/result   {"id", "node", "ok": bool, "detail": str, corridor면 "reached": 마지막 노드, "then_done": bool}
   /docking/cancel   {"id"}   -> 바로 멈추고 결과는 보내지 않는다
+                    취소한 일이 멈추는 중에 들어온 새 요청은 거절하지 않고, 멈추면 바로 시작 (끊고 빠지기 · leave)
   /docking/progress {"id", "node"}            corridor: 가로선(또는 거리)으로 노드를 지날 때마다 (안 섬)
+                    {"id", "node", "stage": "in_pocket"}  도크 칸 쪽으로 돌아 후면 주차 시작 (D1 · D2 · D3).
+                    fleet_agent는 이 뒤에 새 명령이 오면 도킹을 끊고 빠지기(leave)부터 한다
   /docking/extend   {"id", "nodes", "then"}   corridor: 달리는 중에 서버 APPEND로 길이 늘어남 -> 이어서 감
 
 방법 -> 구현
@@ -19,7 +22,7 @@ fleet_agent <-> docking 인터페이스 (std_msgs/String, JSON)
             then = tape(P1) -> LineDocker.run / dock_in(D2 · D3) -> 도크 줄 선에서 Steps.park_from_line
   (leave = 노드를 떠날 때, precision_stops의 <노드>.leave)
   undock    : docking/undock.py   마커로 나올 자리까지 + 회전 (+ align 있으면 방위각 정렬)    (D2/D3 -> N16/N15)
-  entrance  : docking/entrance.py Entrance.dock   N1 -> 가운데로 -> 마커 6 · 1 교점 -> 우90 -> 곧게 후진 (D1)
+  entrance  : docking/entrance.py Entrance.dock   N1 -> 가운데로 -> 마커 6 · 1 교점 -> 우90 -> 후면 주차(park) (D1)
   entrance_exit : docking/entrance.py Entrance.undock  D1 -> 교점 -> 우90 북쪽 [-> spin_deg 제자리 회전, AMCL] (그다음 Nav2)
   table     : docking/table_dock.py TableDocker.run   다리 마커로 차선 정렬 -> 바닥 정지선            (T1~T6)
   table_exit: docking/table_dock.py TableDocker.leave 서빙 뒤 dist만큼 전진 (그다음 Nav2)
@@ -71,6 +74,7 @@ class DockingNode(Node):
 
         self.cam = None            # 처음 마커 도킹 때 구독 시작 (카메라는 camera_node가 열고 있음)
         self.job = None            # 지금 요청
+        self.pending = None        # 취소한 일이 멈추는 중에 들어온 요청 (멈추면 바로 시작)
         self.job_start = 0.0
         self.cancel_flag = False
         self.timed_out = False
@@ -86,8 +90,18 @@ class DockingNode(Node):
             req = json.loads(msg.data)
         except ValueError:
             return
+        self.start(req)
+
+    def start(self, req):
         with self.lock:
             if self.job is not None:
+                # 끊긴 일이 아직 멈추는 중이거나, 이 요청이 끊고 시작하라는 것(preempt: 칸 안에서 끊고 빠지기) -> 멈추면 바로 시작
+                # (cancel과 request는 다른 토픽이라 순서가 바뀌어 올 수 있어서 preempt로도 받음)
+                if (self.cancel_flag or req.get('preempt')) and not self.timed_out:
+                    self.cancel_flag = True
+                    self.pending = req
+                    self.get_logger().info(f'{req.get("node")} {req.get("method")}: 앞 일({self.job.get("node")})이 멈추면 시작')
+                    return
                 self.publish(req, False, f'다른 정밀 정차 중 ({self.job.get("node")})')
                 return
             self.job = req
@@ -123,8 +137,24 @@ class DockingNode(Node):
         self.progress_pub.publish(String(data=json.dumps({'id': jid, 'node': node})))
         self.get_logger().info(f'통로 {node} 지남')
 
-    def on_cancel(self, msg):
+    def in_pocket(self):
+        """도크 칸 쪽으로 돌아 후면 주차를 시작함 (Steps.park 처음) -> fleet_agent가 끊길 때 빠지기부터"""
         with self.lock:
+            jid = self.job.get('id') if self.job else None
+            node = self.job.get('node', '') if self.job else ''
+        self.progress_pub.publish(String(data=json.dumps({'id': jid, 'node': node, 'stage': 'in_pocket'})))
+        md.log(f'[{node}] 칸 안 (여기서 끊기면 빠지기부터)')
+
+    def on_cancel(self, msg):
+        try:
+            cid = json.loads(msg.data).get('id')
+        except (ValueError, AttributeError):
+            cid = None
+        with self.lock:
+            if self.pending is not None and (cid is None or cid == self.pending.get('id')):
+                self.get_logger().info(f'{self.pending.get("node")} 시작 전 취소')   # 아직 시작 안 한 요청을 취소
+                self.pending = None
+                return
             if self.job is not None:
                 self.cancel_flag = True
                 self.get_logger().info(f'{self.job.get("node")} 취소')
@@ -182,12 +212,15 @@ class DockingNode(Node):
             timed_out = self.timed_out
             info = dict(self.info)
             self.job = None
+            nxt, self.pending = self.pending, None
         if result is None and not timed_out:
-            return  # 취소: 결과 안 보냄
-        if timed_out:
+            pass  # 취소: 결과 안 보냄
+        elif timed_out:
             self.publish(req, True, 'timeout: Nav2 위치 인정', info)
         else:
             self.publish(req, result == '성공', result, info)
+        if nxt is not None:
+            self.start(nxt)
 
     def docker(self, marker_id, tag):
         md.load_cam_file()
@@ -219,7 +252,7 @@ class DockingNode(Node):
 
     def run_undock(self, req):
         dk = self.docker(int(req['marker']), f'{req.get("node")}_undock')
-        return undock(self, self.cmd_pub, self.cancelled, self.tf_buf, dk.cam, req)
+        return undock(self, self.cmd_pub, self.cancelled, self.tf_buf, dk.cam, req, lidar=self.lidar)
 
     def steps(self, marker, tag, cls=Steps):
         """corridor.Steps (마커 + 라이다 + 바닥 센서). marker가 None이면 카메라 없이 (벽 따라가기만)"""
@@ -230,7 +263,9 @@ class DockingNode(Node):
             cam = self.docker(int(marker), tag).cam
         mv = Motion(self, self.cmd_pub, self.cancelled, self.tf_buf, self.ir, dict(DEFAULTS, ir_black=BAR_BLACK))
         mv.dk.wait_pose()
-        return cls(mv, cam, md.log, self.lidar)
+        st = cls(mv, cam, md.log, self.lidar)
+        st.on_pocket = self.in_pocket
+        return st
 
     def run_entrance(self, req, out):
         """입구 통로 D1 (docking/entrance.py): out=False N1 -> D1, out=True D1 -> 교점 북쪽"""
