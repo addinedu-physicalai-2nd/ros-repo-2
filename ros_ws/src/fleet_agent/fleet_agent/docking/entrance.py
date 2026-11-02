@@ -405,13 +405,15 @@ class Entrance(Steps):
             self.mv.dk.rotate_to(h_w)
 
     def redock(self):
-        """위치 맞추기(LOCALIZE) 뒤: D1 앞(서쪽을 봄)에서 앞 벽 수직 -> 옆(남북)을 기록에 맞춤 -> 마커 1 거리 = D1 기록까지 곧게 후진
-        (옆을 안 맞추고 들어가면 19 mm 비껴 주차 -> 다음 빠지기가 느려짐)"""
-        rec = _load('~/align_d1s.json')
+        """위치 맞추기(LOCALIZE) 뒤: D1 앞(서쪽을 봄)에서 D2 · D3와 같은 후면 주차(Steps.park)를 마커 1로
+        - 벽 방향은 마커 1 기울기(15 cm에서도 5° 넘게 틀림) 대신 라이다 앞 벽으로 재서 고정
+        - 옆(남북)은 후진하면서 줄 따라가기로 고침 (예전: 남쪽으로 90° 돌아 옆걸음 -> 다시 90°)
+        - 줄 자세 = dock_target_d1line (교점), 정답 = dock_target_d1"""
         h_w = self.front_square('다시 주차 벽 수직')
-        self.lat_fix(rec, h_w, '다시 주차 옆')
-        h_w = self.front_square('다시 주차 벽 수직 (옆 맞춘 뒤)')
-        m = self.back_to(rec['d1_tz'], h_w, 'D1로 후진')
+        phi = md.wrap(h_w + math.pi)                 # 벽 법선 (벽 -> 로봇 쪽), wall_record와 같은 기준
+        self.park(1, _load('~/dock_target_d1line.json'), _load('~/dock_target_d1.json'), 'D1', phi=phi)
+        rec = _load('~/align_d1s.json')
+        m = self.see(1, 0.025, frames=15)
         if m is not None:
             self.log(f'[D1 다시 주차] 기록과: 앞뒤 {(m["tz"] - rec["d1_tz"]) * 1000:+.0f} mm, '
                      f'옆 {(m["tx"] - rec.get("d1_tx", m["tx"])) * 1000:+.0f} mm')

@@ -243,12 +243,17 @@ ros2 run nav2_map_server map_saver_cli -f ~/maps/pinkytorang_map_v6    # 저장 
 - 못 찾으면(`wait_sec` 30초) 그 자리에 멈추고 `CMD_FAILED reason="guest_lost:<노드>:<이유>"` -> 서버가 안내 실패 처리, 로봇은 집으로
 - YOLO는 guide 노드(별도 프로세스)에서 확인하는 동안에만 `infer_hz`로 돈다. 주행(fleet_agent)을 막지 않는다
 - 켜기: `ros2 launch fleet_agent robot_system.launch.xml ... use_guide:=true`
-  - 모델: 저장소 `models/best.pt`(yolov8n, 클래스 toy_person / toy_car / cone)가 빌드 때 `share/fleet_agent/models/`에 같이 설치되고 기본값으로 쓰인다.
+  - 모델: `models/best.pt`(클래스 toy_person / table / pinky)가 빌드 때 `share/fleet_agent/models/`에 같이 설치되고 기본값으로 쓰인다.
+    **.pt는 git에 없다** (`.gitignore`). 로봇마다 `ros_ws/src/fleet_agent/models/best.pt`로 복사한 뒤 빌드
     손님 = `class_name: toy_person` (config/fleet_agent.yaml guide 쪽)
   - 다른 모델: `guide_model:=<경로.pt>` (클래스 이름이 다르면 class_name도), 모델 없이 흐름만: `guide_model:=""`
   - 카메라 토픽 `camera_topic`(기본 /camera/image_raw)을 내는 노드가 따로 있어야 한다
   - guide 노드를 안 켜면 손님 확인을 건너뛰고 바로 진행, 모델이 없으면 guide 노드가 바로 OK (흐름 시험용)
-- 필요: `pip install ultralytics` (로봇 파이썬 환경)
+- 필요: 로봇마다 YOLO venv `~/venvs/yolo` (ultralytics + CPU torch). PC에서 로봇별로 한 번:
+  `ssh pinky1 'bash -s' < ros_ws/src/fleet_agent/tools/setup_yolo_venv.sh` (pinky2 · pinky3도)
+  - launch가 guide 노드에만 venv를 `PYTHONPATH` 앞에 붙인다. 다른 노드(camera · docking · fleet_agent)는 시스템 python 그대로
+  - 시스템 python(`~/.local`)에는 ultralytics를 깔지 않는다 (venv 연결이 틀려도 조용히 돌아가 버려서 확인이 안 됨)
+  - launch 없이 guide_node만 띄울 때: 그 터미널에서 `export PYTHONPATH=$HOME/venvs/yolo/lib/python3.12/site-packages:$PYTHONPATH`
 
 ## 노드 순회 시험 (node_tour) - 서버 없이 Nav2 node to node 확인
 

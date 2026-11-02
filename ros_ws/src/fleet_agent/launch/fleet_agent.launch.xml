@@ -38,6 +38,8 @@
     <param from="$(var params)"/>
   </node>
   <node pkg="fleet_agent" exec="guide_node" name="guide" output="screen" if="$(var use_guide)">
+    <!-- YOLO(ultralytics · CPU torch)는 로봇마다 ~/venvs/yolo (tools/setup_yolo_venv.sh). guide 노드에만 앞에 붙임 -->
+    <env name="PYTHONPATH" value="$(env HOME)/venvs/yolo/lib/python3.12/site-packages:$(env PYTHONPATH '')"/>
     <param from="$(var params)"/>
     <param name="model_path" value="$(var guide_model)"/>
   </node>

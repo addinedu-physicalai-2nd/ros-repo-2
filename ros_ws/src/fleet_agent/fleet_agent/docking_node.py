@@ -286,7 +286,7 @@ class DockingNode(Node):
 
     def run_redock(self, req):
         """위치 맞추기(LOCALIZE) 끝: 도크 앞으로 나와 한 바퀴 돈 뒤, 앞 마커를 보며 기록 자리로 다시 주차
-        D1 (kind entrance): 앞 벽 수직 -> 마커 1 거리로 곧게 후진 (= 들어가기 마지막 단계)
+        D1 (kind entrance): 앞 벽 수직(라이다 = 줄 방향) -> D2 · D3와 같은 후면 주차를 마커 1로 (d1line -> d1)
         D2 · D3 (kind dock_in): 도크 마커로 줄 자세(stop) 맞추고 -> 기록(target)까지 후면 주차 (= dock_in 마지막 단계)"""
         node, kind = req.get('node'), req.get('kind')
         if kind == 'entrance':

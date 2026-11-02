@@ -255,9 +255,10 @@ class Steps:
             self.mv.dk.rotate_to(h)
         self.mv.drive(dist, back, h, vmax)
 
-    def match(self, marker, rec, tag):
+    def match(self, marker, rec, tag, phi_fixed=None):
         """N15: 도크 마커를 가까이(15 cm) 보고 기록 자세(rec)로. 앞뒤 · 방향만 확실히 맞추고,
         옆(2 cm 안)은 후진하면서 줄 따라가기가 고치니 여기서 억지로 옆걸음하지 않음 (흔들림 방지)
+        phi_fixed: 벽 방향을 마커 기울기 대신 이 값으로 (D1: 마커 1 기울기가 5° 넘게 틀려서 라이다 앞 벽으로 잰 값)
         반환 (D, phi): 마커 위치 · 벽 방향 (15장 중앙값, 가장 정확한 측정)"""
         size = rec.get('size', 0.025)
         D = phi = None
@@ -266,7 +267,10 @@ class Steps:
             if m is None:
                 raise RuntimeError(f'마커 {marker}가 안 보임 ({tag})')
             p, D = self._marker_odom(m)
-            phi = md.dock_in_odom(m, p)[1] if m['tz'] < YAW_OK_Z else md.wrap(p[2] + math.pi)
+            if phi_fixed is not None:
+                phi = phi_fixed
+            else:
+                phi = md.dock_in_odom(m, p)[1] if m['tz'] < YAW_OK_Z else md.wrap(p[2] + math.pi)
             T = md.dock_to_odom(D, phi, rec['gx'], rec['gy'], rec['gth'])
             lat, along, dth = self._rel(p, T, phi)
             self.log(f'[{tag} {k}] 마커 {m["tz"] * 100:.1f} cm: 옆 {lat * 1000:+.0f} mm, 앞뒤 {along * 1000:+.0f} mm, '
@@ -285,14 +289,15 @@ class Steps:
                 break
         return D, phi
 
-    def park(self, marker, stop_rec, target_rec, name='N15'):
+    def park(self, marker, stop_rec, target_rec, name='N15', phi=None):
         """후면 주차 (실무 도킹 방식: 움직이면서 계속 보고, 정답 자세와 비교하며 줄을 따라감)
         - 정답 = D3 기록 자세. 벽 방향은 N15에서 멈춰서 잰 값(가장 정확)으로 고정
+          (phi를 주면 그 값으로 고정: D1은 라이다 앞 벽 방향)
         - 후진 중 매 프레임 마커 위치를 재서 도크 위치를 조금씩 고침 (가까울수록 많이 믿음)
         - 줄에서 옆으로 벗어난 만큼만 아주 살짝 기움 (최대 PARK_STEER_DEG, 회전 속도 PARK_W_MAX 제한) -> 크게 안 틈
         - 끝: 멈춰서 정답 자세와 비교, 앞뒤 · 방향 마무리"""
         import time
-        D, phi = self.match(marker, stop_rec, f'{name} 맞추기')
+        D, phi = self.match(marker, stop_rec, f'{name} 맞추기', phi_fixed=phi)
         g = target_rec
         size = g.get('size', 0.025)
         _set_size(size)
