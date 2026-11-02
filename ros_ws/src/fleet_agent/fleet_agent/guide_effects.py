@@ -144,6 +144,23 @@ def _hw(name, cls):
         return _HW[name]
 
 
+_BUZZER_STARTED = False             # 부저 PWM은 처음 한 번만 켜고 끄지 않음 (아래 _buzzer)
+
+
+def _buzzer(Buzzer):
+    """부저: 객체 하나를 계속 쓰고, PWM은 처음 한 번만 buzzer_start.
+    소리를 멈출 때는 duty 0만 (buzzer_stop을 하면 같은 객체로 다시 start해도 소리가 안 남:
+    연속 안내 때 두 번째부터 부저만 조용하던 문제). 새 Buzzer를 또 만들면 같은 핀에 PWM이 겹쳐 실패할 수 있다"""
+    global _BUZZER_STARTED
+    b = _hw('buzzer', Buzzer)
+    with _HW_LOCK:
+        if not _BUZZER_STARTED:
+            b.buzzer_start()
+            b.set_buzzer_duty(0)
+            _BUZZER_STARTED = True
+    return b
+
+
 def _stop_rainbow():
     """돌고 있는 무지개 LED를 멈춤 (새 효과가 시작될 때)"""
     global _led_thread
@@ -232,6 +249,7 @@ def play(kind, log=print, hold=None):
 def _play_locked(kind, log, hold, LED, Buzzer, LCD):
     global _led_thread
     led = None
+    b = None
     try:
         notes = MELODY.get(kind, MELODY['welcome'])
         imgs = {k: face(kind, k) for k in set(f for f in frames_for(kind) if f is not None)}   # 미리 그려 둠
@@ -239,8 +257,7 @@ def _play_locked(kind, log, hold, LED, Buzzer, LCD):
         lcd.set_backlight(255)
         lcd.img_show(imgs.get(0) or face(kind, 0))
         led = _hw('led', LED)
-        b = _hw('buzzer', Buzzer)
-        b.buzzer_start()
+        b = _buzzer(Buzzer)                                   # 처음 한 번만 start (두 번째 안내부터 소리 안 나던 문제)
         total = sum(sec + NOTE_GAP for _, sec in notes)       # 소리 전체 길이 -> 무지개 2바퀴를 여기에 고르게
         start = time.monotonic()
         shown = [-1]
@@ -272,8 +289,7 @@ def _play_locked(kind, log, hold, LED, Buzzer, LCD):
             b.set_buzzer_duty(0)
             t_note += NOTE_GAP                                # 음 사이 살짝 끊어서 또렷하게
             led_until(t_note)
-        b.set_buzzer_duty(0)
-        b.buzzer_stop()                                       # 소리만 멈춤 (객체는 다음 효과에서 다시 씀)
+        b.set_buzzer_duty(0)                                  # 소리만 끔. buzzer_stop은 안 함 (다음 효과에서 다시 못 켬)
         if LCD_BLACK:
             _lcd_black(lcd)                                   # 소리 끝 = 얼굴 지우고 검은 화면 (정리 전에)
         led.fill(RAINBOW[-1])                                 # 2바퀴 끝 = 보라 (마지막 색 그대로 둠)
@@ -287,6 +303,11 @@ def _play_locked(kind, log, hold, LED, Buzzer, LCD):
         return t
     except Exception as e:  # noqa: BLE001
         log(f'안내 효과 실패: {e}')
+        if b is not None:            # 중간에 실패해도 소리는 끔
+            try:
+                b.set_buzzer_duty(0)
+            except Exception:  # noqa: BLE001
+                pass
         if led is not None:          # 중간에 실패해도 LED는 끔 (팀 main과 같음)
             _led_off(led, log)
         return None
