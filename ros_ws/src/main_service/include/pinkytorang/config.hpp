@@ -48,6 +48,8 @@ struct Config {
   int depart_grace_sec = 2;      // 카운트다운 0 이후 실제 출발까지
   int max_active_serve = 2;      // 빈 테이블이 있을 때 동시에 서빙하는 로봇 최대 수 (만석이면 로봇 수 전부)
   int max_active_guide = 1;      // 동시에 안내하는 로봇 최대 수
+  std::string guide_greet_node;   // 안내: 이 노드에서 손님을 맞음 (입구 로봇이 여기로 나와 키오스크 쪽을 보고 손님을 기다림). "" = 예전 (도크에서 바로)
+  std::string guide_greet_face;   // 맞는 노드에서 바라볼 노드 (키오스크 쪽, 예: D1)
   std::map<std::string, std::string> guide_spots;  // 안내: 테이블 -> 서는 노드 (그 노드에서 테이블 쪽을 봄). 없으면 테이블 정차점
   bool table_pass_through = false;  // 테이블은 지나가며 서고 반대 노드로 나감 (들어갈 때 나갈 칸까지 같이 잡음)
   int serve_batch_max = 3;       // 같은 테이블 주문을 한 번에 싣는 최대 건수

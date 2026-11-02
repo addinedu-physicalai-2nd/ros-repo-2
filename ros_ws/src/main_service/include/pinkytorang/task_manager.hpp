@@ -159,7 +159,8 @@ class TaskManager {
   bool robotFree(const Robot& r);      // 배정 가능: 쓸 수 있고 · 충전 아님 · 작업 없음 · 귀가 중 아님
   bool hasWaitingGuide() const;
   bool tableBusy(const std::string& table) const;  // 그 테이블로 가는 중이거나 서 있는 로봇이 있나 (종류 상관없이)
-  bool entranceOk(const std::string& robot_id);  // 배터리가 충분해서 입구 도킹에 세워도 되나 / 이어받기 가능
+  bool entranceOk(const std::string& robot_id);
+  bool guideCandidate(Robot& r);   // 안내를 맡을 수 있나 (입구 도크 대기 · 안내 마치고 복귀 중 · 맞는 자리에서 쉼)  // 배터리가 충분해서 입구 도킹에 세워도 되나 / 이어받기 가능
   int freeTableCount() const;
   bool fullHouse() const;
   int entranceStandbyWanted() const;   // 입구에 세워 둘 로봇 수 (찬 테이블 수 기준)

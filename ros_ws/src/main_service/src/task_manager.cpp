@@ -457,7 +457,10 @@ void TaskManager::processArrivals() {
       }
       Task* t = findTask(r->task_id);
       if (!t || t->goal_node != a.node) continue;
-      if (t->stage == Stage::TO_PICKUP) enterStage(*t, Stage::AT_PICKUP);
+      if (t->stage == Stage::ASSIGNED && t->kind == TaskKind::GUIDE) {
+        record("TASK", r->id + " " + a.node + "에서 손님 맞을 준비 (키오스크 쪽)");
+        enterStage(*t, Stage::TO_TABLE);   // 안내 Move: 로봇이 이 자리에서 손님을 찾고(greet) 테이블로
+      } else if (t->stage == Stage::TO_PICKUP) enterStage(*t, Stage::AT_PICKUP);
       else if (t->stage == Stage::TO_TABLE) enterStage(*t, Stage::AT_TABLE);
       else if (t->stage == Stage::TO_DOCK) enterStage(*t, Stage::DONE);
     }
@@ -522,6 +525,23 @@ bool TaskManager::robotFree(const Robot& r) {
 }
 
 // 안내는 입구 도킹에 서 있는 로봇이 맡는다 (앞칸 로봇부터). 동시에 max_active_guide 대까지
+// guide_greet_node(N1)가 있으면: 로봇은 먼저 N1로 나와 키오스크 쪽(guide_greet_face)을 보고 서고(ASSIGNED),
+//   도착하면 안내(TO_TABLE) Move -> 로봇이 그 자리에서 손님을 찾음(greet) -> 찾으면 환영 효과 후 테이블로.
+//   안내가 쌓여 있으면 방금 안내를 마친 로봇(도크로 돌아가는 중)이 도크까지 안 가고 바로 다음 안내를 맡아 N1로 감.
+//   N1에서 쉬고 있는 로봇(손님 놓침 등)도 맡음. 안내가 없으면 평소처럼 도크(D1)로
+bool TaskManager::guideCandidate(Robot& r) {
+  if (!robotUsable(r) || r.charging || !entranceOk(r.id) || dispatch_.dockBlocked(r.id)) return false;
+  if (r.task_id < 0 && !r.homing && traffic_.isStationary(r.id) && dispatch_.isEntranceDock(traffic_.currentNode(r.id)))
+    return true;                                                       // 입구 도크에서 대기 (예전과 같음)
+  if (cfg_.guide_greet_node.empty()) return false;
+  if (r.task_id >= 0) {                                                // 안내를 마치고 도크로 돌아가는 중
+    const Task* t = findTask(r.task_id);
+    return t && t->kind == TaskKind::GUIDE && t->stage == Stage::TO_DOCK;
+  }
+  if (r.homing) return dispatch_.isEntranceDock(traffic_.goalOf(r.id));   // 입구 도크로 가는 중
+  return traffic_.isStationary(r.id) && traffic_.currentNode(r.id) == cfg_.guide_greet_node;   // 맞는 자리에서 쉬는 중
+}
+
 void TaskManager::dispatchGuide() {
   int active = 0;
   for (auto& pair : tasks_) {
@@ -538,19 +558,35 @@ void TaskManager::dispatchGuide() {
     if (tableBusy(t.table)) continue;  // 그 테이블에 서빙 로봇이 아직 있으면 떠난 뒤에
 
     std::string robot_id;
-    for (const std::string& dock : cfg_.entrance_docks) {
-      for (auto& rp : robots_) {
-        Robot& r = rp.second;
-        if (robot_id.empty() && robotFree(r) && traffic_.isStationary(r.id) && traffic_.currentNode(r.id) == dock)
-          robot_id = r.id;
+    double best = 1e9;
+    for (auto& rp : robots_) {
+      Robot& r = rp.second;
+      if (!guideCandidate(r)) continue;
+      std::string to = cfg_.guide_greet_node.empty() ? map_.tableNode(t.table) : cfg_.guide_greet_node;
+      double c = traffic_.pathCost(r.id, to);
+      if (c < 0) c = 1e8;
+      if (c < best) {
+        best = c;
+        robot_id = r.id;
       }
     }
-    if (robot_id.empty()) return;  // 입구 로봇이 없으면 다음에 (rebalanceStandby가 채움)
+    if (robot_id.empty()) return;  // 맡을 로봇이 없으면 다음에 (rebalanceStandby가 입구를 채움)
 
+    Robot& r = robots_[robot_id];
+    if (r.task_id >= 0) {          // 안내를 마치고 돌아가던 로봇: 도크까지 안 가고 다음 안내
+      Task* old = findTask(r.task_id);
+      if (old) {
+        record("TASK", robot_id + " 도크 복귀 중 다음 안내 이어받기 (task " + std::to_string(old->id) + " -> " +
+                           std::to_string(t.id) + ")");
+        enterStage(*old, Stage::DONE);
+      }
+    }
+    r.homing = false;
     t.robot = robot_id;
-    robots_[robot_id].task_id = t.id;
+    r.task_id = t.id;
     enterStage(t, Stage::ASSIGNED);
-    enterStage(t, Stage::TO_TABLE);
+    if (cfg_.guide_greet_node.empty()) enterStage(t, Stage::TO_TABLE);   // 예전 방식: 도크에서 바로 안내
+    else goTo(t, cfg_.guide_greet_node);   // 맞는 자리(N1)로 가서 키오스크 쪽을 보고 섬 (이미 거기면 바로 도착 처리)
     return;
   }
 }
@@ -693,7 +729,16 @@ int TaskManager::entranceStandbyCount() const {
     const Robot& r = pair.second;
     if (!r.seen || !r.online || r.charging || !traffic_.isLocalized(r.id)) continue;
     std::string target = traffic_.isStationary(r.id) ? traffic_.currentNode(r.id) : traffic_.goalOf(r.id);
-    if (dispatch_.isEntranceDock(target)) n++;
+    if (dispatch_.isEntranceDock(target)) {
+      n++;
+      continue;
+    }
+    // 안내 중인 로봇(맞는 자리로 나감 · 안내 · 착석 대기)도 입구 로봇으로 친다: 그사이 다른 로봇을 입구로 불러
+    // N1 · D1 통로에서 마주치지 않게. 안내를 마치면(TO_DOCK) 다시 D1으로 (또는 쌓인 다음 안내)
+    auto it = tasks_.find(r.task_id);
+    if (r.task_id >= 0 && it != tasks_.end() && it->second.kind == TaskKind::GUIDE &&
+        (it->second.stage == Stage::ASSIGNED || it->second.stage == Stage::TO_TABLE || it->second.stage == Stage::AT_TABLE))
+      n++;
   }
   return n;
 }
@@ -963,6 +1008,8 @@ void TaskManager::goTo(Task& t, const std::string& node) {
   // 안내 손님과 같이 가는 길이면 Move.guide (인사 · 확인 · 도착 효과는 로봇이 알아서)
   bool guide = t.kind == TaskKind::GUIDE && t.stage == Stage::TO_TABLE;
   std::string go = node, face;
+  if (t.kind == TaskKind::GUIDE && t.stage == Stage::ASSIGNED && node == cfg_.guide_greet_node)
+    face = cfg_.guide_greet_face;   // 맞는 자리: 키오스크 쪽을 보고 섬
   if (guide && cfg_.guide_spots.count(t.table) && map_.node(cfg_.guide_spots.at(t.table))) {
     // 안내는 테이블 칸에 안 들어가고 옆 노드(guide_spots)에서 테이블 쪽을 보고 선다 (서빙 라인트레이싱과 안 겹치게)
     go = cfg_.guide_spots.at(t.table);
