@@ -65,7 +65,8 @@ class FleetAgent(Node):
         rev = ReverseControl(speed=p('reverse_speed', 0.06).value, tol=p('reverse_tolerance', 0.03).value)
         policy = BlockPolicy(dynamic_wait=p('dynamic_wait_sec', 3.0).value, dynamic_ask=p('dynamic_ask_sec', 5.0).value,
                              static_wait=p('static_wait_sec', 2.0).value, unknown_wait=p('unknown_wait_sec', 8.0).value,
-                             wait=p('block_wait_sec', 10.0).value)
+                             wait=p('block_wait_sec', 10.0).value,
+                             person_wait=p('block_person_wait_sec', 30.0).value)
         self.driver = Driver(self, stops, pass_tol=p('pass_tolerance', 0.08).value,
                              yaw_tol=p('yaw_tolerance', 0.15).value, done_grace=p('done_grace_sec', 0.5).value,
                              reverse=rev, policy=policy, nav_retries=p('nav_retries', 1).value,

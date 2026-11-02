@@ -6,7 +6,9 @@
                  arrive: 도착 효과만 (결과 안 보냄)
       /guide/cancel   {id}  기다리던 것 그만
       camera_topic    sensor_msgs/Image (bgr8 / rgb8) 또는 sensor_msgs/CompressedImage
+      /obstacle/status  (obstacle 노드) 앞으로 가다 막혔는지
 보냄  /guide/result   {id, ok, detail}
+      /obstacle/person  std_msgs/Bool: 막혔을 때 obstacle_hz로 YOLO -> 앞에 손님(class_name)이 보이나 (obstacle_check)
 
 - YOLO는 요청을 처리하는 동안에만, infer_hz로 가장 최근 프레임 하나씩 돌린다 (CPU 아끼기, 주행 노드와 다른 프로세스)
 - confirm 번 연속으로 보이면 "찾음". wait_sec 안에 못 찾으면 ok=false (fleet_agent가 서버에 guest_lost)
@@ -21,7 +23,7 @@ import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
 from sensor_msgs.msg import CompressedImage, Image
-from std_msgs.msg import String
+from std_msgs.msg import Bool, String
 
 from .guide_effects import leds_off, play
 
@@ -41,6 +43,12 @@ class GuideNode(Node):
         self.effects = p('effects', True).value
         self.require_detector = p('require_detector', False).value
         self.welcome_first = p('welcome_on_request', True).value   # greet가 오면(테이블 선택) 바로 환영
+        self.obstacle_check = p('obstacle_check', True).value       # 앞으로 가다 막히면 YOLO로 사람인지 (obstacle 노드에 알림)
+        self.obstacle_hz = float(p('obstacle_hz', 1.0).value)
+        self.blocked = False
+        self.watching = False        # 손님 찾는 중 (그동안 장애물 확인은 쉼)
+        self.person_logged = None
+        self.model_lock = threading.Lock()                           # 손님 찾기 스레드와 장애물 확인이 모델을 같이 씀
 
         self.frame = None
         self.frame_t = 0.0
@@ -54,6 +62,10 @@ class GuideNode(Node):
         self.create_subscription(String, '/guide/cancel', self.on_cancel, rel)
         img_type = CompressedImage if self.compressed else Image
         self.create_subscription(img_type, self.camera_topic, self.on_image, qos_profile_sensor_data)   # camera_node = best effort
+        self.person_pub = self.create_publisher(Bool, '/obstacle/person', 10)
+        if self.obstacle_check and self.model is not None:
+            self.create_subscription(String, '/obstacle/status', self.on_obstacle, 10)
+            self.create_timer(1.0 / max(0.2, self.obstacle_hz), self.check_obstacle)
         self.get_logger().info(f'guide 노드 시작 (카메라 {self.camera_topic}, '
                                f'{"YOLO " + self.class_name if self.model else "감지기 없음"})')
 
@@ -72,6 +84,42 @@ class GuideNode(Node):
         except Exception as e:  # noqa: BLE001
             self.get_logger().error(f'YOLO 모델 못 읽음 ({e}) -> 손님 확인 없이 바로 OK')
             return None, None
+
+    # ---------------------------------------------------------------- 장애물이 사람인가 (막혔을 때만)
+    def on_obstacle(self, msg):
+        try:
+            s = json.loads(msg.data)
+        except ValueError:
+            return
+        blocked = bool(s.get('blocked')) and s.get('direction') == 'FORWARD'   # 카메라는 앞만 봄
+        if blocked and not self.blocked:
+            self.person_logged = None
+        self.blocked = blocked
+
+    def check_obstacle(self):
+        if not self.blocked or self.watching:
+            return                       # 안 막힘 · 손님 찾는 중(모델 사용 중)
+        with self.frame_lock:
+            msg, ft = self.frame, self.frame_t
+        if msg is None or time.monotonic() - ft > 1.0:
+            return                       # 최근 프레임 없음
+        seen = self.detect(msg)
+        if seen is None:
+            return
+        self.person_pub.publish(Bool(data=seen))
+        if seen != getattr(self, 'person_logged', None):
+            self.person_logged = seen
+            self.get_logger().info(f'막힌 앞: {"사람(" + self.class_name + ") 보임" if seen else "사람 안 보임"}')
+
+    def detect(self, msg):
+        """프레임 하나에 class_name이 보이나 (실패하면 None)"""
+        try:
+            with self.model_lock:
+                r = self.model(self.to_bgr(msg), verbose=False, conf=self.conf)[0]
+            return r.boxes is not None and any(int(c) == self.class_id for c in r.boxes.cls.tolist())
+        except Exception as e:  # noqa: BLE001
+            self.get_logger().warn(f'YOLO 실패: {e}')
+            return None
 
     def on_image(self, msg):
         with self.frame_lock:
@@ -129,6 +177,13 @@ class GuideNode(Node):
 
     # ---------------------------------------------------------------- 손님 찾기 (스레드)
     def watch(self, rid, action, node, cancel):
+        self.watching = True
+        try:
+            self._watch(rid, action, node, cancel)
+        finally:
+            self.watching = False
+
+    def _watch(self, rid, action, node, cancel):
         self.get_logger().info(f'{node}: 손님 {"기다림" if action == "greet" else "확인"} (최대 {self.wait_sec:.0f}초)')
         end = time.monotonic() + self.wait_sec
         period = 1.0 / max(0.5, self.infer_hz)
@@ -141,12 +196,7 @@ class GuideNode(Node):
                 continue
             last_t, got_frame = ft, True
             t0 = time.monotonic()
-            try:
-                r = self.model(self.to_bgr(msg), verbose=False, conf=self.conf)[0]
-                seen = r.boxes is not None and any(int(c) == self.class_id for c in r.boxes.cls.tolist())
-            except Exception as e:  # noqa: BLE001
-                self.get_logger().warn(f'YOLO 실패: {e}')
-                seen = False
+            seen = bool(self.detect(msg))
             hits = hits + 1 if seen else 0
             if hits >= self.confirm:
                 if action == 'greet' and not self.welcome_first:

@@ -13,7 +13,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 sys.path.insert(0, os.path.dirname(__file__))
 
 from fleet_agent.core import (CMD_DONE, EV_BLOCKED, FORWARD, NODE_REACHED, BlockPolicy, Driver,  # noqa: E402
-                              ReverseControl)
+                              ObstacleClass, ReverseControl)
 from test_core import FakeRobot, run  # noqa: E402
 
 N1, N2, N3, N4 = ('N1', 0.0, 0.0, 0.0), ('N2', 1.0, 0.0, 0.0), ('N3', 0.0, 1.0, 1.5708), ('N4', 1.0, 1.0, 0.0)
@@ -104,3 +104,27 @@ def test_no_detour_keeps_waiting_then_continues_when_clear():
     run(r, d, 40, hook=hook)
     assert len([e for e in r.events if e[0] == EV_BLOCKED]) == 1
     assert reached(r) == ['N2'] and math.hypot(r.x - 1.0, r.y) < 1e-6
+
+
+def test_camera_person_is_person_until_clear():
+    # 카메라(YOLO)가 한 번 사람을 보면 막힘이 풀릴 때까지 PERSON, 풀리면 처음부터
+    c = ObstacleClass()
+    assert c.update(0.0, 0.15) == 'UNKNOWN'
+    assert c.update(0.5, 0.15, person=True) == 'PERSON'
+    assert c.update(3.0, 0.15) == 'PERSON'          # 사람이 화면 밖으로 잠깐 벗어나도 유지 (LiDAR엔 그대로)
+    assert c.update(3.1, None) == ''
+    assert c.update(3.2, 0.15) == 'UNKNOWN'
+
+
+def test_policy_person_waits_30s_without_detour():
+    # 사람: 10초에 보고하지 않고 30초까지 LCD '지나갈게요'로 기다림 -> 그래도 있으면 BLOCKED(PERSON)
+    p = BlockPolicy(wait=10.0, person_wait=30.0)
+    asks, reports = [], []
+    for i in range(400):
+        kind = 'UNKNOWN' if i < 20 else 'PERSON'        # 처음 2초는 모름, 그다음 카메라가 사람을 봄
+        a, rep = p.update(i * 0.1, kind)
+        asks.append(a)
+        if rep:
+            reports.append((round(i * 0.1, 1), rep))
+    assert reports == [(30.0, 'PERSON')]
+    assert asks[35] and asks[150] and asks[295] and not asks[310]

@@ -144,7 +144,7 @@ class ObstacleClass:
     - 거리가 window 동안 move_thresh 넘게 흔들리면 DYNAMIC (사람)
     - static_sec 동안 그대로면 STATIC (물건)
     - 그 전에는 UNKNOWN
-    - person=True (카메라 YOLO)면 바로 DYNAMIC
+    - person=True (카메라 YOLO가 앞에서 toy_person을 봄)면 PERSON (한 번 보면 막힘이 풀릴 때까지 유지)
     """
 
     def __init__(self, window=1.5, move_thresh=0.04, static_sec=2.0, settle_sec=0.5):
@@ -155,11 +155,13 @@ class ObstacleClass:
         self.since = None
         self.hist = []
         self.dynamic_seen = False
+        self.person_seen = False
 
     def reset(self):
         self.since = None
         self.hist = []
         self.dynamic_seen = False
+        self.person_seen = False
 
     def update(self, t, dist, person=False):
         """dist = 앞 장애물 거리 (None = 막힘 없음) -> kind 또는 '' (막힘 없음)"""
@@ -172,7 +174,9 @@ class ObstacleClass:
             self.hist.append((t, dist))
             self.hist = [(ht, hd) for ht, hd in self.hist if t - ht <= self.window]
         if person:
-            self.dynamic_seen = True
+            self.person_seen = True
+        if self.person_seen:
+            return 'PERSON'
         if len(self.hist) >= 2:
             ds = [hd for _, hd in self.hist]
             if max(ds) - min(ds) > self.move_thresh:
@@ -190,6 +194,8 @@ class BlockPolicy:
         dynamic_wait 초부터 보고 전까지 LCD '지나갈게요'. 그사이 비키면 그대로 이어 감
         (서 있는 레고 인형은 LiDAR로는 거리 변화가 없어 STATIC으로 잡힌다 -> 사람 · 물건 똑같이 기다림)
         보고(BLOCKED) 받은 서버는 막힌 노드를 피해 다른 길을 찾는다 (없으면 로봇은 계속 기다림)
+        PERSON (카메라 YOLO가 사람을 봄): 사람은 비켜 주니 우회하지 않고 person_wait 초(기본 30)까지 LCD '지나갈게요'로
+        기다림. 그래도 안 비키면 그때 BLOCKED(PERSON)
     wait <= 0 (예전 방식):
     - 사람(DYNAMIC): dynamic_wait 초 기다림 -> dynamic_ask 초 동안 LCD '지나갈게요' -> 보고
     - 물건(STATIC) : static_wait 초 확인 -> 보고
@@ -197,7 +203,8 @@ class BlockPolicy:
     보고는 한 번만. 길이 비면 처음부터.
     """
 
-    def __init__(self, dynamic_wait=3.0, dynamic_ask=5.0, static_wait=2.0, unknown_wait=8.0, wait=0.0):
+    def __init__(self, dynamic_wait=3.0, dynamic_ask=5.0, static_wait=2.0, unknown_wait=8.0, wait=0.0, person_wait=30.0):
+        self.person_wait = person_wait
         self.dynamic_wait = dynamic_wait
         self.dynamic_ask = dynamic_ask
         self.static_wait = static_wait
@@ -217,7 +224,10 @@ class BlockPolicy:
         el = t - self.since
         ask = False
         due = None
-        if self.wait > 0:                 # 종류와 상관없이 wait 초
+        if self.wait > 0 and kind == 'PERSON':   # 카메라로 사람 확인: 더 오래 기다림 (비켜 줄 테니 우회 안 함)
+            due = max(self.wait, self.person_wait)
+            ask = self.dynamic_wait <= el < due
+        elif self.wait > 0:               # 종류와 상관없이 wait 초
             due = self.wait
             ask = self.dynamic_wait <= el < due
         elif kind == 'DYNAMIC':

@@ -61,6 +61,9 @@
   - 사람 · 물건 모두 `block_wait_sec`(10초) 기다림, 3초부터 LCD "지나갈게요". 그 전에 비키면 그대로 이어 감
     (서 있는 레고 인형은 LiDAR로는 거리 변화가 없어 STATIC으로 잡혀서 종류를 가리지 않음)
   - 10초 지나도 있으면 서버에 `BLOCKED` 한 번 (`node = 막힌 노드`, `reason = "STATIC:N2->N5"`)
+  - 카메라로 사람 확인: 앞으로 가다 막히면 guide 노드가 1초에 한 번 YOLO(`toy_person`) -> `/obstacle/person`.
+    사람이면 `PERSON`: 우회하지 않고 `block_person_wait_sec`(30초)까지 "지나갈게요"로 기다림, 그래도 있으면 `BLOCKED(PERSON)`.
+    후진 구간 · guide 노드나 모델이 없을 때는 예전처럼 LiDAR로만 (`obstacle_check: false`로 끔)
   - 서버(TrafficManager 규칙 9 `reroute`): 막힌 노드를 `block_avoid_sec`(60초) 동안 빼고 지금 노드에서 다시 계산
     - 다른 길 있음: `[지금 노드]` REPLACE + 새 길 APPEND → 로봇은 지금 노드로 돌아갔다가 새 길로.
       다른 로봇 · 다음 목적지도 그 노드를 피함 (누가 그 노드를 지나가면 치워진 것으로 보고 풂)
