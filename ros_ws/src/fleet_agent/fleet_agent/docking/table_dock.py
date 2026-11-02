@@ -19,6 +19,10 @@ table (run)
 table_exit (leave)
   서빙 뒤 다음 출발 전에: 지금 방향으로 dist(m) 전진 (line_dock.Motion.drive) -> 그다음 Nav2
 
+카메라 오프셋: records/cam/<hostname>.json 의 dy (m, + 왼쪽), dyaw_deg (+ 반시계) = 기준 로봇(pinky1) 대비
+  카메라가 옆 · 각도로 틀어져 달린 양 (table_align.py --cam-offset 으로 잼). 측정값을 기준 로봇 카메라 값으로 바꿔서
+  기록(pinky1로 찍음)을 다른 로봇도 그대로 씀. 없으면 0 (보정 안 함)
+
 기록 파일: 팀 marker_dock과 같은 형식 {gx, gy, gth, fx, size} (도크 좌표계: 원점 = 마커, x = 법선)
   table_align.py --record-lane 으로 만든다 (차선 위 한 점 + 방향. gx 쪽 앞뒤 위치는 의미 없음)
   마커 ID = 테이블 번호 + 1(왼쪽) / 2(오른쪽), 이름 t1l · t1r … (fleet_msgs/docs/record_json_format.md)
@@ -56,6 +60,30 @@ DEFAULTS = {
     'accel': 0.10,           # 출발 가속 제한 (m/s^2). 정렬 뒤 급출발하면 바퀴가 미끄러져 옆/방향이 틀어짐
     'w_start': 0.10,         # 출발 직후 방향 보정 최대 (rad/s). 속도가 붙을수록 0.4까지
 }
+
+
+def load_cam_offset():
+    """records/cam/<hostname>.json -> (dy m, dyaw rad). 없으면 (0, 0)"""
+    path = records.cam_file()
+    try:
+        with open(path) as f:
+            j = json.load(f)
+        return float(j.get('dy', 0.0)), math.radians(float(j.get('dyaw_deg', 0.0)))
+    except (OSError, ValueError):
+        return 0.0, 0.0
+
+
+def cam_correct(m, dy, dyaw):
+    """이 로봇 카메라 측정 -> 기준 로봇 카메라였으면 나왔을 값 (table_align.cam_correct와 같음).
+    카메라 좌표 (앞 z, 왼쪽 y = -tx)를 dyaw만큼 돌리고 옆으로 dy, 마커 각도도 dyaw만큼"""
+    if dy == 0.0 and dyaw == 0.0:
+        return m
+    z, y = m['tz'], -m['tx']
+    c, s = math.cos(dyaw), math.sin(dyaw)
+    out = dict(m)
+    out['tz'], out['tx'] = c * z - s * y, -(s * z + c * y + dy)
+    out['yaw'] = md.wrap(m['yaw'] + dyaw)
+    return out
 
 
 def lane_offset(pose, goal):
@@ -154,6 +182,7 @@ class TableDocker:
         self.cam = cam
         self.ir = ir if ir is not None else {'v': None, 'n': 0}
         self.c = dict(DEFAULTS)
+        self.cam_off = (0.0, 0.0)
 
     # ------------------------------------------------------------ 준비
     def _cfg(self, req):
@@ -193,6 +222,7 @@ class TableDocker:
         self.cam.snapshot(tag)
         if m is None:
             return None
+        m = cam_correct(m, *self.cam_off)       # 로봇별 카메라 오프셋 (기준 로봇 값으로)
         p = dk.wait_pose()
         D, phi = md.dock_in_odom(m, p)
         spread = math.degrees(m['yaw_spread'])
@@ -286,6 +316,9 @@ class TableDocker:
         if f is None:
             return f'실패: {node_id} from에 {src} 없음'
         md.load_cam_file()
+        self.cam_off = load_cam_offset()
+        if self.cam_off != (0.0, 0.0):
+            md.log(f'[카메라 오프셋] 옆 {self.cam_off[0] * 1000:+.1f} mm, 각도 {math.degrees(self.cam_off[1]):+.2f}° 보정')
         g, path = self._load_target(f)
         old_size = md.MARKER_SIZE_M
         _set_size(float(g.get('size', 0.025)))

@@ -528,8 +528,16 @@ class Docker:
         if not 300 < fx < 900:
             return f'실패: 보정값 {fx:.0f}이 이상함 (저장 안 함)'
         path = records.cam_file(write=True)
+        cj = {}
+        if os.path.exists(path):
+            try:
+                with open(path) as f:
+                    cj = json.load(f)       # dy · dyaw_deg(카메라 오프셋) 같은 다른 값은 지키기
+            except ValueError:
+                cj = {}
+        cj['fx'] = fx
         with open(path, 'w') as f:
-            json.dump({'fx': fx}, f, indent=2)
+            json.dump(cj, f, indent=2)
         return f'보정 저장: FX {fx:.1f} -> {path} (레포에 커밋 · push)'
 
     def record(self, target_file):
