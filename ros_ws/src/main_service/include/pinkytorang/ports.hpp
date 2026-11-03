@@ -25,7 +25,7 @@ class IClientOut {
   virtual void pushConfirmNeeded(const ConfirmView& c) = 0;         // 확인 버튼 띄우기
   virtual void pushConfirmClosed(const ConfirmView& c, const std::string& by) = 0;  // by = BUTTON / TIMEOUT
   virtual void pushAlert(const std::string& level, const std::string& robot_id, const std::string& message) = 0;
-  // 로봇이 막힘(BLOCKED)을 보고했고 그 로봇 카메라(YOLO)가 앞을 찍어 뒀으면: 관제 화면 팝업 (사진은 GET /api/robots/<id>/obstacle.jpg)
+  // 로봇 카메라(YOLO)가 앞 장애물로 멈춰 세운 순간 (+ 막힘 보고 때): 관제 화면 팝업 (사진은 GET /api/robots/<id>/obstacle.jpg)
   virtual void pushObstacleSnap(const std::string& robot_id, const std::string& node, const std::string& kind,
                                 const std::string& label, long long stamp_ms) = 0;
 };

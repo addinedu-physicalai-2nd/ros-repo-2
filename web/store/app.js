@@ -120,7 +120,7 @@ function onMessage(msg) {
 }
 
 // ---------- 장애물 사진 팝업 ----------
-// 서버가 막힘(BLOCKED) 보고 때 보내 줌 (카메라 YOLO가 찍은 사진이 있을 때만). 로봇마다 하나 (새로 오면 바꿈)
+// 로봇 카메라(YOLO)가 멈춰 세운 순간 서버가 보내 줌 (멈춘 동안 몇 초마다 새 사진). 로봇마다 하나 (새로 오면 바꿈)
 // 닫힘: ✕ / 그 로봇이 막힘이 아니게 되고 5초 / 2분 지남
 const SNAP_KEEP_MS = 120000, SNAP_AFTER_CLEAR_MS = 5000;
 function renderSnaps() {

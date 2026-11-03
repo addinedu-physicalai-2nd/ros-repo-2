@@ -352,7 +352,7 @@ void TaskManager::onRobotEvent(const std::string& id, uint8_t type, uint32_t cmd
     } else {
       alert("WARN", id, "진행이 막혔어요 (" + node + ", " + info + "). 비키면 이어서 가요");
     }
-    // 카메라(YOLO)가 앞을 찍어 뒀으면 관제 화면에 팝업 (라이다만 본 장애물은 사진이 없거나 오래됨 -> 안 띄움)
+    // 카메라(YOLO)가 앞을 찍어 뒀으면 팝업을 한 번 더 (멈춘 순간 이미 떴음. 이력에 남기고 막힘 종류로 갱신)
     auto sit = snaps_.find(id);
     if (client_ && sit != snaps_.end() &&
         std::chrono::duration<double>(Clock::now() - sit->second.at).count() <= cfg_.obstacle_snap_max_age_sec) {
@@ -403,6 +403,14 @@ void TaskManager::onObstacleSnap(const std::string& id, std::string jpeg, const 
   s.jpeg = std::move(jpeg);
   s.label = label;
   s.at = Clock::now();
+  // 카메라가 멈춰 세운 순간 바로 관제 팝업 (멈춘 동안 몇 초마다 새 사진이 오면 같은 팝업을 새로 그림)
+  if (client_) {
+    std::string node = traffic_.nextNode(id);
+    if (node.empty()) node = traffic_.currentNode(id);
+    long long ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                       std::chrono::system_clock::now().time_since_epoch()).count();
+    client_->pushObstacleSnap(id, node, "PERSON", label, ms);
+  }
 }
 
 bool TaskManager::obstacleSnap(const std::string& id, std::string& jpeg) {
