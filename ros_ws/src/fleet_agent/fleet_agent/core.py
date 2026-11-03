@@ -815,6 +815,8 @@ class Driver:
             self.io.direction('STOP')
             self.io.precision(self.leave_req)
             return
+        if self._entrance_turnback(pose):
+            return
         stop = self.stops.get(self.cur.node_id, {})
         if (stop.get('method') == 'entrance' and self._precise_here(self.cur)
                 and self.last_node == stop.get('from', self.last_node)):
@@ -837,8 +839,25 @@ class Driver:
             return
         self._begin_move(pose)
 
+    def _entrance_turnback(self, pose):
+        """입구 도크(D1)로 들어갈 차례인데 바로 다음이 지금 노드(N1)로 되돌아오는 길 (D1 복귀 중 새 안내 · 서빙이 붙음):
+        통로에 안 들어가고 D1은 지나간 것으로 친 뒤 N1부터 이어 감 (도킹했다 빠지기 안 함)"""
+        if self.cur is None or self.stops.get(self.cur.node_id, {}).get('method') != 'entrance':
+            return False
+        if not len(self.queue) or self.queue.steps[0].node_id != self.last_node:
+            return False
+        self.io.log(f'{self.cur.node_id} 들어가기 전에 새 길 ({self.last_node}로 되돌아옴) -> 통로 안 들어가고 {self.last_node}부터')
+        self.entrance_turn = False
+        self.entrance_req = None
+        self.io.cmd_vel(0.0, 0.0)
+        self._pass_step(self.cur)
+        self._after_node(pose)
+        return True
+
     def _begin_move(self, pose):
         self.seg_start = (pose[0], pose[1])
+        if self.entrance_turn and self._entrance_turnback(pose):
+            return
         if self.entrance_turn:
             self.entrance_turn = False
             self.axis = None

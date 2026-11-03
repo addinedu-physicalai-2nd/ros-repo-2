@@ -1131,3 +1131,36 @@ def test_turn_command_direction_latched_near_pi():
     w1, _ = turn_command(0.0, math.pi - 0.01, direction=1)
     w2, _ = turn_command(0.0, -math.pi + 0.01, direction=1)
     assert w1 > 0 and w2 > 0
+
+
+def test_entrance_d1_return_with_new_job_before_n1_skips_corridor():
+    # D1로 복귀(N1 -> D1) 중 N1 닿기 전에 서빙이 붙음 (서버: D1 뒤에 [N1 N2] APPEND)
+    # -> N1에서 통로에 안 들어감: D1은 지나간 것으로 치고 N1부터 이어 감 (도킹 · 빠지기 없음)
+    r, d = make(*N2, math.pi, last_drive=FORWARD)
+    d.stops = ENT_STOPS
+    d.on_move(97, False, FORWARD, [('N1',) + N1 + (math.pi,)], False, 'D1')
+    d.on_move(97, True, REVERSE, [('D1',) + D1 + (0.069,)], False, 'D1')
+    d.on_move(97, True, FORWARD, [('N1',) + N1 + (0.0,), ('N2',) + N2 + (0.0,)], False, 'N2')
+    run(r, d, 40)
+    assert r.prec == [], '입구 도킹 · 빠지기 안 함'
+    ev = [(t, n) for t, n, _ in r.events]
+    assert (DOCKED, 'D1') not in ev and (UNDOCKED, 'D1') not in ev
+    assert reached(r) == ['N1', 'D1', 'N1', 'N2']
+    assert d.leave_from == ''
+
+
+def test_entrance_d1_new_job_while_turning_at_n1_skips_corridor():
+    # N1에서 D1 쪽으로 도는 중(entrance_turn) 새 길이 붙음 -> 도킹 넘겨주지 않고 N1부터
+    r, d = make(*N2, math.pi, last_drive=FORWARD)
+    d.stops = ENT_STOPS
+    d.on_move(98, False, FORWARD, [('N1',) + N1 + (math.pi,)], False, 'D1')
+    d.on_move(98, True, REVERSE, [('D1',) + D1 + (0.069,)], False, 'D1')
+    sent = {'done': False}
+
+    def hook(t):
+        if not sent['done'] and d.entrance_turn:
+            sent['done'] = True
+            d.on_move(98, True, FORWARD, [('N1',) + N1 + (0.0,), ('N2',) + N2 + (0.0,)], False, 'N2')
+    run(r, d, 40, hook=hook)
+    assert sent['done'] and r.prec == []
+    assert reached(r) == ['N1', 'D1', 'N1', 'N2']

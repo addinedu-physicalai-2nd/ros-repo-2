@@ -297,7 +297,7 @@ class FleetAgent(Node):
             return
         self.get_logger().info(f'정밀 정차 결과 {r}')
         self.driver.on_precision_result(bool(r.get('ok')), r.get('detail', ''),
-                                        {k: r[k] for k in ('reached', 'then_done') if k in r})
+                                        {k: r[k] for k in ('reached', 'then_done', 'exited') if k in r})
 
     def guide(self, req):
         self.guide_req_id += 1

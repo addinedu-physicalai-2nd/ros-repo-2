@@ -126,9 +126,9 @@ class Entrance(Steps):
                  + ', '.join(f'{s} {d_ * 100:.1f} cm' for s, (d_, a_, n_) in ws.items()))
         return h, ws
 
-    def go(self, dist, west, w_ref, tag, reverse=False, end_side=None, appear_side=None, after=None):
+    def go(self, dist, west, w_ref, tag, reverse=False, end_side=None, appear_side=None, after=None, stop_if=None):
         """dist만큼 (reverse면 뒤로): 방향 = 벽 평행 (계속 고침), 옆 = 통로 가운데 (양쪽 벽이 보이면 두 거리 차,
-        한쪽만 보이면 서쪽 벽(west = '왼쪽'/'오른쪽')까지 w_ref).
+        한쪽만 보이면 서쪽 벽(west = '왼쪽'/'오른쪽')까지 w_ref). stop_if()가 참이면 그 자리에서 멈춤 (입구 도킹 중 새 길).
         end_side가 있으면 그쪽 벽이 END_GONE_M 이어서 안 보이는 곳(END_MIN_M 넘어서)에서 멈춤.
         appear_side가 있으면 그쪽 벽이 처음 나타난 곳에서 after만큼 더 가서 멈춤 (N1 -> 칸막이 시작 기준)
         반환 (벽 방향, 간 거리, 끝 찾음이면 끊긴 곳 거리 아니면 None)"""
@@ -142,6 +142,9 @@ class Entrance(Steps):
         t0 = time.time()
         while time.time() - t0 < 40.0:
             tick = time.time()
+            if stop_if is not None and stop_if():
+                self.log(f'  새 길 -> {tag} 그만 (여기서 멈춤)')
+                break
             p = self.mv.dk.pose()
             u = np.array([math.cos(h_c), math.sin(h_c)]) * sgn
             U = float((np.array(p[:2]) - S) @ u)
@@ -347,7 +350,8 @@ class Entrance(Steps):
         return '기록 끝 (D1 · 교점 · N1). 로봇은 N1에서 남쪽을 봄 -> 바로 "in" 시험'
 
     def _exit_at_cross(self, h_north, tag):
-        """입구 도킹 중 새 길이 옴 (칸에 들어가기 전): 교점에서 북쪽으로 돌고 끝 = 빠지기(entrance_exit) 끝난 자리와 같음"""
+        """입구 도킹 중 새 길이 옴 (칸에 들어가기 전): 그 자리(통로 · 교점)에서 북쪽으로 돌고 끝. 통로 폭 ~45 cm라 제자리 회전 됨.
+        끝 = 빠지기(entrance_exit) 끝난 자리처럼 북쪽을 봄 -> fleet_agent가 N1로 Nav2"""
         p = self.mv.dk.pose()
         left = md.wrap(h_north - p[2])
         self.log(f'[D1] 새 길 -> 도킹 그만, {tag}에서 북쪽 보고 빠짐 (남은 회전 {math.degrees(left):+.0f}°)')
@@ -361,12 +365,14 @@ class Entrance(Steps):
         rec = _load('~/align_d1s.json')
         h, ws = self.wall_heading('N1')
         self.go(rec['n1_dist'] + ENTRY_EXTRA + 0.30, '오른쪽', rec.get('w_west'), 'N1 -> 교점 (가운데)',
-                appear_side='왼쪽', after=rec['n1_dist'] + ENTRY_EXTRA)
+                appear_side='왼쪽', after=rec['n1_dist'] + ENTRY_EXTRA, stop_if=self.exit_requested)
         h = self.mv.dk.pose()[2]
-        if self.exit_requested():                     # 교점 도착 (남쪽을 봄) -> 북쪽 = 반대
-            return self._exit_at_cross(md.wrap(h + math.pi), '교점')
+        if self.exit_requested():                     # 통로 가는 중 · 교점 도착 (남쪽을 봄) -> 그 자리에서 북쪽 = 반대
+            return self._exit_at_cross(md.wrap(h + math.pi), '통로')
         self.M6 = None
         for k in range(1, 4):                         # 남북: 마커 6 거리 = 기록
+            if self.exit_requested():
+                return self._exit_at_cross(md.wrap(h + math.pi), '교점')
             a6 = self.along6(h, f'교점 {k}', self.M6)
             if a6 is None:
                 break
