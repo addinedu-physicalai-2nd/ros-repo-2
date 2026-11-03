@@ -735,12 +735,20 @@ class Steps:
         self.park(int(cfg['marker']), _load(f'~/dock_target_{cfg["stop"]}.json'),
                   _load(f'~/dock_target_{cfg["target"]}.json'), name, target=cfg['target'])
 
-    def park_from_line(self, cfg):
-        """도크 줄 가로선(N15 / N16) 위에서 남쪽을 보고 섬 -> 우90 -> 마커로 줄 기록 자세 맞춤 -> 후면 주차"""
+    def park_from_line(self, cfg, still=None):
+        """도크 줄 가로선(N15 / N16) 위에서 남쪽을 보고 섬 -> 우90 -> 마커로 줄 기록 자세 맞춤 -> 후면 주차
+        still(): 주차 직전에 다시 확인 (도는 동안 새 길이 와서 도킹이 빠졌으면 False) -> 원래 방향으로 돌아와 줄 노드에서 끝.
+        반환 True = 주차함, False = 안 함 (줄 노드에 남쪽을 보고 섬)"""
         name = str(cfg['stop']).upper()
+        h0 = self.mv.dk.pose()[2]
         self.turn(float(cfg.get('turn_deg', TURN_DEG)), name)
+        if still is not None and not still():
+            e = self.mv.dk.rotate_to(h0)
+            self.log(f'[{name}] 주차 직전 확인: 도킹 빠짐 -> 원래 방향으로 (남은 {e:+.1f}°), 칸 안 들어감')
+            return False
         self.park(int(cfg['marker']), _load(f'~/dock_target_{cfg["stop"]}.json'),
                   _load(f'~/dock_target_{cfg["target"]}.json'), name, target=cfg['target'])
+        return True
 
     def follow_bars(self, names, start, on_pass=None, resume=False):
         """통로 후진 (남쪽을 보고 북쪽으로): 방향 = 라이다 양옆 벽과 평행, 옆 = 서쪽 벽에서 W_REF.

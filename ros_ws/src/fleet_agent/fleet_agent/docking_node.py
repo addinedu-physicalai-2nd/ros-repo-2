@@ -333,7 +333,12 @@ class DockingNode(Node):
                 dict(then, approach=True, approach_max=float(then.get('approach_max', 0.6))))
         elif then.get('method') == 'dock_in':
             st = self.steps(int(then['marker']), f'{node}_dock_in')
-            st.park_from_line(then)
+
+            def still():   # 우90 도는 동안 fleet_agent가 extend로 도킹을 뺐는지 (복귀 중 새 일)
+                with self.lock:
+                    return ((self.plan or {}).get('then') or {}).get('method') == 'dock_in'
+            if not st.park_from_line(then, still=still):
+                return '성공'           # info는 위에서 정한 그대로 (reached = 줄 노드, then_done False)
             result = '성공'
         else:
             return f'실패: 모르는 then {then.get("method")}'
