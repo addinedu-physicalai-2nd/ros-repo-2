@@ -320,3 +320,19 @@ def test_gate_two_of_three_not_consecutive():
     g2 = CamBlockGate()
     g2.update([NEAR], 0.0); g2.update([], 0.1); g2.update([], 0.2)
     assert g2.update([NEAR], 0.3)[0] is False                                        # 창 밖으로 밀려남 -> 아직
+
+
+def test_gate_releases_when_robot_turns_away():
+    # 우회하려고 뒤돌면 (본 때 방향에서 60° 넘게) 가까워 안 보임 버티기 중이어도 바로 풂
+    import math
+    g = CamBlockGate(lost_hold=15.0, on_n=1)
+    close = ((0.40, 0.45, 0.60, 0.99), 0.90)
+    assert g.update([close], 0.0, yaw=0.0)[0] is True
+    assert g.update([], 1.0, yaw=0.3)[0] is True                                     # 조금 틈: 버팀
+    assert g.update([], 2.0, yaw=math.radians(90))[0] is False and g.why == 'turned'
+
+
+def test_gate_no_new_block_while_spinning():
+    g = CamBlockGate()
+    assert g.update([NEAR], 0.0, spinning=True)[0] is False                         # 돌며 스친 한 장
+    assert g.update([NEAR], 0.1)[0] is False and g.update([NEAR], 0.2)[0] is True    # 멈춰서 다시 2/3

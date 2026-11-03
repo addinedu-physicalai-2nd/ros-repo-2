@@ -20,6 +20,7 @@
 - 모델 · ultralytics가 없으면 require_detector=false일 때 바로 ok (detail no_detector) -> 카메라 없이도 안내 흐름 시험 가능
 """
 import json
+import math
 import threading
 import time
 
@@ -27,7 +28,11 @@ import numpy as np
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
+from geometry_msgs.msg import Twist
+from rclpy.duration import Duration
+from rclpy.time import Time
 from sensor_msgs.msg import CompressedImage, Image
+from tf2_ros import Buffer, TransformListener
 from std_msgs.msg import Bool, String
 
 from .core import CamBlockGate, near_box
@@ -66,7 +71,13 @@ class GuideNode(Node):
             release_x=float(p('cam_release_x', 0.45).value),          # 멈춘 뒤에는 이만큼 옆까지 보이면 안 풂 (비켜 가다 옆으로 침)
             release_bottom=float(p('cam_release_bottom', 0.50).value),  # 그리고 박스 아래끝이 화면 이만큼 아래 (가까움)
             max_area=float(p('cam_block_max_area', 0.45).value),      # 화면의 이만큼 넘게 덮는 박스는 오검출로 봄
-            lost_hold=float(p('cam_lost_hold_sec', 2.0).value))       # 가까워서 안 보이게 된 건 이만큼 더 있다고 봄
+            lost_hold=float(p('cam_lost_hold_sec', 2.0).value),       # 가까워서 안 보이게 된 건 이만큼 더 있다고 봄
+            turn_release_deg=float(p('cam_turn_release_deg', 60.0).value))   # 본 때보다 이만큼 넘게 돌면 바로 풂
+        self.base_frame = p('base_frame', 'base_link').value
+        self.spin_w = float(p('cam_spin_w', 0.3).value)              # 직진 거의 0 + 이보다 빠른 회전 = 제자리 회전 (새로 안 멈춤)
+        self.tf = Buffer()
+        self.tf_listener = TransformListener(self.tf, self)
+        self.cmd = (0.0, 0.0)
         self.obstacle_snap = p('obstacle_snap', True).value          # 카메라로 멈출 때 화면을 서버로 (관제 팝업)
         self.obstacle_snap_every = float(p('obstacle_snap_every', 5.0).value)
         self.snap_t = 0.0
@@ -90,6 +101,7 @@ class GuideNode(Node):
         self.create_subscription(String, '/guide/cancel', self.on_cancel, rel)
         img_type = CompressedImage if self.compressed else Image
         self.create_subscription(img_type, self.camera_topic, self.on_image, qos_profile_sensor_data)   # camera_node = best effort
+        self.create_subscription(Twist, '/cmd_vel', self.on_cmd, 10)
         self.person_pub = self.create_publisher(Bool, '/obstacle/person', 10)
         self.camera_pub = self.create_publisher(Bool, '/obstacle/camera', 10)
         self.snap_pub = self.create_publisher(CompressedImage, '/fleet/obstacle_snap',
@@ -150,6 +162,18 @@ class GuideNode(Node):
             elif self.direction == 'FORWARD':
                 self.get_logger().info('카메라: 앞에 손님 없음 -> 풂')
 
+    def on_cmd(self, msg):
+        self.cmd = (msg.linear.x, msg.angular.z)
+
+    def odom_yaw(self):
+        """odom 기준 로봇 방향 (없으면 None -> 도는 것으로 풀기 안 함)"""
+        try:
+            t = self.tf.lookup_transform('odom', self.base_frame, Time(), timeout=Duration(seconds=0.0))
+        except Exception:  # noqa: BLE001
+            return None
+        q = t.transform.rotation
+        return math.atan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y * q.y + q.z * q.z))
+
     def check_obstacle(self):
         if self.watching:
             return                       # 손님 찾는 중(모델 사용 중)
@@ -170,7 +194,10 @@ class GuideNode(Node):
         boxes = [b for b, _ in dets]
         if fwd:
             was_near = self.near
-            near, box = self.gate.update(dets, now)
+            spinning = abs(self.cmd[0]) < 0.01 and abs(self.cmd[1]) > self.spin_w
+            near, box = self.gate.update(dets, now, yaw=self.odom_yaw(), spinning=spinning)
+            if was_near and not near and self.gate.why == 'turned':
+                self.get_logger().info('카메라: 로봇이 돌아서 앞에 없음 -> 풂')
             self.set_near(near, box)
             if near and self.gate.why == 'lost_close' and not getattr(self, '_lost_logged', False):
                 self._lost_logged = True
