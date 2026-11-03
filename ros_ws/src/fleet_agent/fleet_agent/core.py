@@ -401,6 +401,7 @@ class Driver:
         self.prec_info = {}           # docking 결과에 붙은 값 (corridor reached · then_done)
         self.prec_result = ''         # 마지막 정밀 정차 결과 detail
         self.entrance_req = None      # entrance_approach 요청 (N1에서 D1 도킹을 통째로)
+        self.entrance_exit_sent = False   # 입구 도킹 중 '그만하고 교점에서 빠져라'를 보냄
         self.entrance_turn = False    # entrance: D1 쪽으로 돌고 나서 맡김
         self.greet_after_leave = False  # 안내 첫 출발이 도크에서: leave 끝나고 인사
         self._last_pose = (0.0, 0.0, 0.0)
@@ -432,6 +433,15 @@ class Driver:
             return
         if not self.queue.apply(cmd_id, True, drive, waypoints, guide, goal):
             self.io.log(f'다른 명령({cmd_id})에 붙이는 APPEND 무시 (지금 {self.queue.cmd_id})')
+            return
+        if (not self.pocket and self.phase == 'entrance_approach' and self.prec_state == 'running'
+                and self.entrance_req and len(self.queue) and not self.entrance_exit_sent):
+            # D1 입구 도킹 중(칸에 들어가기 전) 길이 더 옴 (예: 다음 안내 -> N1): 도킹 끝까지 안 하고 교점에서 북쪽 보고 빠짐
+            self.entrance_exit_sent = True
+            self.io.log(f'{self.cur.node_id} 입구 도킹 중 길이 더 옴 -> 칸 들어가기 전이면 교점에서 빠지기')
+            precision_exit = getattr(self.io, 'precision_exit', None)
+            if precision_exit:
+                precision_exit()
             return
         if self.pocket and len(self.queue):
             # 칸 안에서 길이 더 옴 (서버 '도킹 복귀 중 이어받기'는 도크 뒤에 새 길을 APPEND)
@@ -500,6 +510,8 @@ class Driver:
         if self.prec_state == 'running' and (self.stops.get(node, {}) or {}).get('leave'):
             self.pocket = node
             self.io.log(f'{node}: 칸 안 (끊기면 빠지기부터)')
+            if self.entrance_exit_sent and len(self.queue):
+                self._cut_docking_on_append()   # '교점에서 빠지기'가 늦어 이미 칸 안: 끊고 빠지기부터 (APPEND와 같음)
 
     def _cut_docking_on_append(self):
         """칸 안 도킹 중 APPEND: 도킹을 끊고 도크를 지나간 노드로 친 뒤(NODE_REACHED) 다음 출발에서 빠지기(leave)부터"""
@@ -673,8 +685,17 @@ class Driver:
                 self.prec_done_node = self.cur.node_id
                 self._reached(pose)
         elif self.phase == 'entrance_approach':
+            if self.prec_state == 'ok' and self.prec_info.get('exited'):
+                # 칸에 안 들어가고 교점에서 북쪽을 봄 (빠지기 끝난 자리와 같음) -> D1은 지나간 것으로, 다음 노드(N1)로 Nav2
+                self.prec_state = ''
+                self.entrance_req = None
+                self.entrance_exit_sent = False
+                self.io.log(f'{self.cur.node_id} 안 들어가고 교점에서 빠짐 -> 다음 노드로')
+                self._reached(pose)
+                return
             if self.prec_state == 'ok':
                 self.prec_state = ''
+                self.entrance_exit_sent = False
                 self.prec_done_node = self.cur.node_id   # 입구 도킹까지 끝 = D1 도착 (돌지 않음)
                 self.entrance_req = None
                 self._mark_leave(self.cur.node_id)       # 도킹 중 APPEND로 지나가는 노드가 돼도 나올 때 빠지기
@@ -815,6 +836,7 @@ class Driver:
                                      from_node=self.last_node)
             self.phase = 'entrance_approach'
             self.prec_state = 'running'
+            self.entrance_exit_sent = False
             self.io.direction('STOP')
             self.io.log(f'입구 도킹 넘겨받기: {self.last_node} -> {self.cur.node_id}')
             self.io.precision(dict(self.entrance_req))

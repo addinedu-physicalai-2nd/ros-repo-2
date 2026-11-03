@@ -346,12 +346,25 @@ class Entrance(Steps):
                  f'교점 -> N1(칸막이 끝) {end_at * 100:.1f} cm')
         return '기록 끝 (D1 · 교점 · N1). 로봇은 N1에서 남쪽을 봄 -> 바로 "in" 시험'
 
+    def _exit_at_cross(self, h_north, tag):
+        """입구 도킹 중 새 길이 옴 (칸에 들어가기 전): 교점에서 북쪽으로 돌고 끝 = 빠지기(entrance_exit) 끝난 자리와 같음"""
+        p = self.mv.dk.pose()
+        left = md.wrap(h_north - p[2])
+        self.log(f'[D1] 새 길 -> 도킹 그만, {tag}에서 북쪽 보고 빠짐 (남은 회전 {math.degrees(left):+.0f}°)')
+        if abs(left) > math.radians(120):
+            self.spin_here(abs(math.degrees(left)), h_north, direction=-1)   # 거의 반대: 한 방향(우)으로 크게 돎
+        else:
+            self.mv.dk.rotate_to(h_north)
+        return 'exited'
+
     def dock(self):
         rec = _load('~/align_d1s.json')
         h, ws = self.wall_heading('N1')
         self.go(rec['n1_dist'] + ENTRY_EXTRA + 0.30, '오른쪽', rec.get('w_west'), 'N1 -> 교점 (가운데)',
                 appear_side='왼쪽', after=rec['n1_dist'] + ENTRY_EXTRA)
         h = self.mv.dk.pose()[2]
+        if self.exit_requested():                     # 교점 도착 (남쪽을 봄) -> 북쪽 = 반대
+            return self._exit_at_cross(md.wrap(h + math.pi), '교점')
         self.M6 = None
         for k in range(1, 4):                         # 남북: 마커 6 거리 = 기록
             a6 = self.along6(h, f'교점 {k}', self.M6)
@@ -363,10 +376,14 @@ class Entrance(Steps):
             self.mv.move_along(e, h)
             self.mv.dk.rotate_to(h)
         h, ws = self.wall_heading('교점 벽 방향')
+        if self.exit_requested():
+            return self._exit_at_cross(md.wrap(h + math.pi), '교점')
         # 교점에서 우90 -> 앞 벽 수직(라이다) -> 위치 맞추기 뒤 다시 주차와 같은 후면 주차 (마커 1, d1line -> d1)
         # 예전: 남쪽으로 돌아 옆걸음(to_golden) -> 멈춰 재며 곧게 후진(back_to) -> 벽 수직 확인. 느려서 park로 바꿈
         self.turn(-90.0, '교점 우90')
         h_w = self.front_square('교점 벽 수직')
+        if self.exit_requested():                     # 서쪽(D1 쪽)을 봄, 아직 후진 전 -> 북쪽 = 우90
+            return self._exit_at_cross(md.wrap(h_w - math.pi / 2), '교점')
         self.park(1, _load('~/dock_target_d1line.json'), _load('~/dock_target_d1.json'), 'D1',
                   phi=md.wrap(h_w + math.pi))
         m = self.see(1, 0.025, frames=15)

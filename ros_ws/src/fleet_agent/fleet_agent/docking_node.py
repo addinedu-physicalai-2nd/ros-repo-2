@@ -66,6 +66,7 @@ class DockingNode(Node):
         self.create_subscription(String, '/docking/cancel', self.on_cancel, reliable)
         self.progress_pub = self.create_publisher(String, '/docking/progress', reliable)
         self.create_subscription(String, '/docking/extend', self.on_extend, reliable)
+        self.create_subscription(String, '/docking/exit', self.on_exit, reliable)   # D1 입구 도킹 중 새 길: 칸 들어가기 전이면 교점에서 빠짐
         self.tf_buf = Buffer()
         self.tf_listener = TransformListener(self.tf_buf, self)
         self.ir = {'v': None, 'n': 0}      # 바닥 센서 (tape · tape_exit)
@@ -78,6 +79,7 @@ class DockingNode(Node):
         self.pending = None        # 취소한 일이 멈추는 중에 들어온 요청 (멈추면 바로 시작)
         self.job_start = 0.0
         self.cancel_flag = False
+        self.exit_flag = False     # entrance: 칸에 들어가기 전에 그만두고 교점에서 북쪽 보고 끝 (/docking/exit)
         self.timed_out = False
         self.plan = None           # corridor: {'nodes', 'then'} (extend로 바뀜)
         self.info = {}             # 결과에 붙일 값 (corridor reached · then_done)
@@ -110,6 +112,7 @@ class DockingNode(Node):
             self.plan = {'nodes': list(req.get('nodes') or []), 'then': req.get('then')}
             self.job_start = time.monotonic()
             self.cancel_flag = False
+            self.exit_flag = False
             self.timed_out = False
         self.get_logger().info(f'{req.get("node")} {req.get("method")} 시작 {req}')
         threading.Thread(target=self.run, args=(req,), daemon=True).start()
@@ -137,6 +140,16 @@ class DockingNode(Node):
             jid = self.job.get('id') if self.job else None
         self.progress_pub.publish(String(data=json.dumps({'id': jid, 'node': node})))
         self.get_logger().info(f'통로 {node} 지남')
+
+    def on_exit(self, msg):
+        try:
+            cid = json.loads(msg.data).get('id')
+        except (ValueError, AttributeError):
+            cid = None
+        with self.lock:
+            if self.job is not None and self.job.get('method') == 'entrance' and (cid is None or cid == self.job.get('id')):
+                self.exit_flag = True
+                self.get_logger().info(f'{self.job.get("node")} 도킹 그만 -> 칸 들어가기 전이면 교점에서 빠짐')
 
     def in_pocket(self):
         """도크 칸 쪽으로 돌아 후면 주차를 시작함 (Steps.park 처음) -> fleet_agent가 끊길 때 빠지기부터"""
@@ -268,13 +281,18 @@ class DockingNode(Node):
         mv.dk.wait_pose()
         st = cls(mv, cam, md.log, self.lidar)
         st.on_pocket = self.in_pocket
+        st.exit_requested = lambda: self.exit_flag
         return st
 
     def run_entrance(self, req, out):
         """입구 통로 D1 (docking/entrance.py): out=False N1 -> D1, out=True D1 -> 교점 북쪽"""
         st = self.steps(1 if out else 6, f'{req.get("node")}_{"exit" if out else "entrance"}', cls=Entrance)
         md.log(f'[{req.get("node")}] {"빠지기 (교점 -> 북쪽)" if out else "도킹 (N1 -> 교점 -> 후진)"}')
-        md.log(f'결과: {st.undock(float(req.get("spin_deg", 0.0))) if out else st.dock()}')
+        r = st.undock(float(req.get("spin_deg", 0.0))) if out else st.dock()
+        md.log(f'결과: {r}')
+        if r == 'exited':
+            with self.lock:
+                self.info['exited'] = True      # fleet_agent: D1에 안 들어가고 교점에서 북쪽을 봄 (빠지기 끝난 자리와 같음)
         return '성공'
 
     def corridor_names(self):

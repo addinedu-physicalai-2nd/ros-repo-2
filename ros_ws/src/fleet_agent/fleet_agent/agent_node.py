@@ -96,6 +96,7 @@ class FleetAgent(Node):
         self.dock_req_pub = self.create_publisher(String, '/docking/request', reliable)
         self.dock_cancel_pub = self.create_publisher(String, '/docking/cancel', reliable)
         self.dock_extend_pub = self.create_publisher(String, '/docking/extend', reliable)
+        self.dock_exit_pub = self.create_publisher(String, '/docking/exit', reliable)
         self.create_subscription(String, '/docking/progress', self.on_dock_progress, reliable)
         self.dir_pub = self.create_publisher(String, '/obstacle/direction', latched)
         self.create_subscription(String, '/docking/result', self.on_dock_result, reliable)
@@ -264,6 +265,10 @@ class FleetAgent(Node):
 
     def precision_cancel(self):
         self.dock_cancel_pub.publish(String(data=json.dumps({'id': self.dock_req_id})))
+
+    def precision_exit(self):   # Driver io: D1 입구 도킹 중 새 길 -> 칸 들어가기 전이면 교점에서 빠지기
+        self.dock_exit_pub.publish(String(data=json.dumps({'id': self.dock_req_id})))
+        self.get_logger().info('입구 도킹 그만 요청 (칸 들어가기 전이면 교점에서 빠짐)')
 
     def precision_extend(self, req):   # Driver io: 통로 후진 중 길이 늘어남 (같은 요청 id)
         req = dict(req)

@@ -209,6 +209,7 @@ class Steps:
         self.mv, self.cam, self.log = mv, cam, log
         self.lidar = lidar
         self.on_pocket = None     # docking 노드가 넣음: 도크 칸 쪽으로 돌아 후면 주차를 시작할 때 부름 (끊기면 빠지기부터)
+        self.exit_requested = lambda: False   # docking 노드가 넣음: 입구 도킹 중 '그만하고 빠져라' (/docking/exit)
         mv.dk.cam = cam
 
     def see(self, mid, size, frames=FRAMES, find=False):

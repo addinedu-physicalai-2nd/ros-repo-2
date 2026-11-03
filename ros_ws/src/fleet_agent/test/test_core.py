@@ -1067,3 +1067,43 @@ if __name__ == '__main__':
         if name.startswith('test_'):
             fn()
             print('ok', name)
+
+
+class ExitRobot(FakeRobot):
+    """입구 도킹 흉내: precision_exit를 받으면 결과에 exited=True (교점에서 북쪽 보고 끝)"""
+    exits = 0
+
+    def precision_exit(self):
+        self.exits += 1
+
+    def step(self, dt):
+        if self.prec_pending and self.prec_wait <= 0 and self.exits:
+            self.prec_pending = False
+            self.driver.on_precision_result(True, '성공', {'exited': True})
+            return
+        super().step(dt)
+
+
+def test_entrance_docking_cut_before_pocket_exits_at_cross():
+    # D1로 돌아가며 입구 도킹 중(칸 들어가기 전) 다음 안내가 옴 (서버 APPEND [N1] 도착지 N1)
+    # -> 도킹 그만(precision_exit) -> 교점에서 빠짐(exited) -> D1 지나간 것으로 -> N1로 Nav2, 빠지기(entrance_exit) 없음
+    r = ExitRobot(*N2, math.pi)
+    d = Driver(r, ENT_STOPS, reverse=ReverseControl(speed=0.1), policy=BlockPolicy())
+    d.last_drive = FORWARD
+    r.driver = d
+    r.prec_delay = 40
+    d.on_move(96, False, FORWARD, [('N1',) + N1 + (math.pi,)], False, 'D1')
+    d.on_move(96, True, REVERSE, [('D1',) + D1 + (0.069,)], False, 'D1')
+    sent = {'done': False}
+
+    def hook(t):
+        if not sent['done'] and r.prec == ['D1:entrance'] and r.prec_pending:
+            sent['done'] = True
+            d.on_move(96, True, FORWARD, [('N1',) + N1 + (math.pi / 2,)], False, 'N1')
+    run(r, d, 40, hook=hook)
+    assert r.exits == 1
+    assert r.prec == ['D1:entrance'], '빠지기(entrance_exit) 안 함: 이미 교점에서 북쪽을 봄'
+    ev = [(t, n) for t, n, _ in r.events]
+    assert (DOCKED, 'D1') not in ev
+    assert reached(r) == ['N1', 'D1', 'N1']
+    assert [n for t, n, _ in r.events if t == CMD_DONE] == ['N1']
