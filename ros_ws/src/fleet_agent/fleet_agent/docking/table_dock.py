@@ -13,6 +13,9 @@ table (run)
   4. 차선 올라타기: 차선 위 entry_ahead 앞 점으로 바라보기 -> 직진 -> 차선 방향 (이미 차선 위면 생략)
      올라탄 뒤 마커가 아직 보이면 한 번 더 재서 차선을 고침
   5. 차선 방향 직진, 정렬 시작(4 직전)부터 센 lines번째 바닥 선에서 정지 (+ line_offset)
+     한 선 모드 (skip > 0, 기본 0.15): 시작선은 무시. 정렬 끝에서 skip 넘게 간 뒤 처음 밟는 선에서 정지
+       (또는 앞 선에서 min_gap 넘게 지난 선). 시작선을 놓쳐도 실패하지 않음. skip: 0 이면 예전 lines번째 세기
+       선 간격 25 cm(내경) 기준: 시작선이 정렬 끝에서 -12 ~ +15 cm 안이면 맞음 (로그 [한 선] 줄로 확인)
   선 세기: 직진할 때만 (회전 중 선 가장자리 무시), 센서 3개 중 ir_min_dark개 이상 검정이 confirm번 연속이면 선,
            선 사이로 보려면 흰색으로 min_white 이상. 시작할 때 선 위면 그 선을 #1로 (노드는 선 앞이라는 전제)
 
@@ -48,7 +51,13 @@ DEFAULTS = {
     'line_offset': 0.0,      # 선 감지 뒤 더 갈 거리 (m)
     'v_line': 0.04,          # 선 찾으며 직진 속도 (m/s): 설 선 근처
     'v_line_fast': 0.08,     # 바로 앞 선을 지난 뒤 fast_gap까지는 이 속도 (11/3 로그: 선 사이 24 ~ 26 cm를 4 cm/s로 6초)
-    'fast_gap': 0.14,        # 앞 선에서 이만큼까지만 빠르게 (선 사이가 이보다 10 cm 넘게 길어야 안전)
+    'v_entry': 0.04,         # 차선 올라타기 직진 속도 (m/s). 올라타는 중에도 선을 셈 -> 예전 0.08(LIN_V_MAX)은 비스듬히 첫 선을 지날 때 IR 프레임이 모자라 놓침
+    'fast_gap': 0.14,
+    'skip': 0.15,            # > 0 = 한 선 모드: 정렬 끝에서 이 거리(m)까지는 선을 정지 판단에 안 씀 (시작선 무시),
+                             #   그 뒤 처음 밟는 선에서 정지. 0 = 예전처럼 lines번째 선 세기
+                             #   값 = (정렬 끝 -> 정지선 거리) - 8 cm 쯤. 로그 [선] 줄의 '정렬 끝에서 cm'로 정함
+    'min_gap': 0.18,         # 한 선 모드: 앞 선에서 이만큼 넘게 지난 선이면 skip 전이라도 정지선 (선 간격 25 cm + 테이프)
+    'slow_before': 0.05,     # 한 선 모드: skip 이 거리 전까지는 v_line_fast로 빠르게, 그 뒤 v_line        # 앞 선에서 이만큼까지만 빠르게 (선 사이가 이보다 10 cm 넘게 길어야 안전)
     'ir_black': 3000,        # 이보다 크면 검정 (흰 바닥 ~240, 테이프 ~4095)
     'ir_min_dark': 2,        # 3개 중 이만큼 검정이면 선 (비스듬히 지날 때도 잡히게)
     'confirm': 2,            # 새 센서 값이 연속 이만큼 맞아야 검정/흰색 인정
@@ -119,6 +128,7 @@ class LineCounter:
         self.white_from = None
         self.starts = []
         self.last_xy = None      # 마지막으로 센 선을 밟은 자리 (odom)
+        self.hits = []           # 센 선마다 밟은 자리 (odom) - 한 선 모드에서 정렬 끝 기준 거리로 씀
 
     def _sample(self):
         """새 센서 값이 왔으면 검정/흰색 판정 갱신"""
@@ -148,6 +158,7 @@ class LineCounter:
         if self.black:
             self.starts.append(0.0)
             self.last_xy = p[:2]
+            self.hits.append(tuple(p[:2]))
             md.log('[선] 선 위에서 시작 -> 이 선을 #1로 셈')
 
     def tick(self, p, s=0.0):
@@ -163,6 +174,7 @@ class LineCounter:
                 self.count += 1
                 self.starts.append(s)
                 self.last_xy = p[:2]
+                self.hits.append(tuple(p[:2]))
                 md.log(f'[선] #{self.count} 감지')
             return new
         if self.in_line or self.white_from is None:
@@ -297,6 +309,53 @@ class TableDocker:
         dk.stop()
         return hit
 
+    def _drive_one(self, dk, lc, p_end, u, c):
+        """한 선 모드 (skip > 0): 차선 방향으로 가다가 정지선 하나에서 정지. 반환 (멈췄나, 이유)
+        d = 정렬 끝(p_end)에서 차선 방향으로 간 거리. 선 기준:
+          - d >= skip 에서 처음 밟은 선 -> 정지선
+          - 또는 앞 선(정렬 중에 밟은 선 포함)에서 min_gap 넘게 지난 선 -> 정지선 (skip을 짧게 잡았어도 시작선은 안 셈)
+          - skip 전 선은 시작선으로 보고 무시 (못 봐도 상관없음 = 시작선을 놓쳐도 실패 안 함)
+        속도: d < skip - slow_before 는 v_line_fast, 그 뒤 v_line (가속 제한 accel)"""
+        acc, w0 = c['accel'], c['w_start']
+        p_end = np.asarray(p_end, dtype=float)
+        line = math.atan2(u[1], u[0])
+
+        def dist(xy):
+            return float(u @ (np.asarray(xy, dtype=float) - p_end))
+
+        prev = dist(lc.hits[-1]) if lc.hits else None
+        if prev is not None:
+            md.log(f'[한 선] 정렬 중 밟은 선 {len(lc.hits)}개 (마지막: 정렬 끝에서 {prev * 100:+.1f} cm) = 시작선')
+        t0 = t_prev = time.time()
+        v, n_seen = 0.0, len(lc.hits)
+        while time.time() - t0 < md.MOVE_TIMEOUT_S * 2:
+            p = dk.pose()
+            d = dist(p[:2])
+            if lc.tick(p, d):
+                dl = dist(lc.hits[-1])
+                gap = None if prev is None else dl - prev
+                stop = dl >= c['skip'] or (gap is not None and gap >= c['min_gap'])
+                md.log(f'[한 선] 선: 정렬 끝에서 {dl * 100:.1f} cm'
+                       + ('' if gap is None else f', 앞 선에서 {gap * 100:.1f} cm')
+                       + (' -> 정지선' if stop else f' -> 시작선으로 봄 (skip {c["skip"] * 100:.0f} cm 전)'))
+                if stop:
+                    dk.stop()
+                    return True, ''
+                prev = dl
+            if d >= c['line_max']:
+                break
+            now = time.time()
+            dt, t_prev = min(now - t_prev, 0.1), now
+            vcap = c['v_line_fast'] if d < c['skip'] - c['slow_before'] else c['v_line']
+            v = min(vcap, v + acc * dt)
+            if v > vcap:
+                v = vcap
+            w_lim = w0 + (0.4 - w0) * min(1.0, v / max(c['v_line'], 1e-3))
+            dk.send(v, md.clamp(md.HEADING_K * md.wrap(line - p[2]), -w_lim, w_lim))
+            time.sleep(1 / md.MOVE_HZ)
+        dk.stop()
+        return False, f'{c["line_max"] * 100:.0f} cm 가도 정지선 못 찾음 (선 {len(lc.hits) - n_seen}개 더 봄, skip {c["skip"] * 100:.0f} cm)'
+
     def _move(self, dk, lc, x, y, th, tag):
         """odom 자세로: 바라보기 -> (선 세며) 직진 -> 방향 맞추기"""
         p = dk.pose()
@@ -305,7 +364,7 @@ class TableDocker:
             face = math.atan2(y - p[1], x - p[0])
             if abs(math.degrees(md.wrap(face - p[2]))) > md.FACE_SKIP_DEG:
                 dk.rotate_to(face)
-            self._drive(dk, lc, x, y, md.LIN_V_MAX)
+            self._drive(dk, lc, x, y, self.c['v_entry'])
             md.log(f'[{tag}] 직진 {dist * 100:.1f} cm')
         e = dk.rotate_to(th)
         md.log(f'[{tag}] 방향 맞추기 오차 {e:+.1f}°')
@@ -372,12 +431,22 @@ class TableDocker:
         md.log(f'[차선 위] 옆 {lat * 1000:+.1f} mm, 방향 {math.degrees(dth):+.2f}°, 정렬 중 지난 선 {lc.count}개')
 
         # 5. 정지선
-        if lc.count >= c['lines']:
-            return f'실패: 정렬 중에 이미 선 {lc.count}개 지남 (entry_ahead 줄이기 / 노드를 선에서 떨어뜨리기)'
         x0, y0 = p[:2]
-        far = (x0 + c['line_max'] * math.cos(goal[2]), y0 + c['line_max'] * math.sin(goal[2]))
-        if not self._drive(dk, lc, *far, c['v_line'], stop_on=c['lines'], fast=(c['v_line_fast'], c['fast_gap'])):
-            return f'실패: {c["line_max"] * 100:.0f} cm 가도 {c["lines"]}번째 선 못 찾음 (센 선 {lc.count}개)'
+        if c['skip'] > 0:            # 한 선 모드: 시작선 무시, skip 뒤 첫 선
+            u = np.array([math.cos(goal[2]), math.sin(goal[2])])
+            md.log(f'[한 선] 정렬 끝에서 {c["skip"] * 100:.0f} cm까지 선 무시 -> 그 뒤 첫 선에서 정지')
+            ok, why = self._drive_one(dk, lc, p[:2], u, c)
+            if not ok:
+                return f'실패: {why}'
+            what = '한 선 모드 정지선'
+        else:                        # 선 세기: 정렬 시작부터 lines번째
+            if lc.count >= c['lines']:
+                return f'실패: 정렬 중에 이미 선 {lc.count}개 지남 (entry_ahead 줄이기 / 노드를 선에서 떨어뜨리기)'
+            far = (x0 + c['line_max'] * math.cos(goal[2]), y0 + c['line_max'] * math.sin(goal[2]))
+            if not self._drive(dk, lc, *far, c['v_line'], stop_on=c['lines'],
+                               fast=(c['v_line_fast'], c['fast_gap'])):
+                return f'실패: {c["line_max"] * 100:.0f} cm 가도 {c["lines"]}번째 선 못 찾음 (센 선 {lc.count}개)'
+            what = f'{c["lines"]}번째 선'
         if c['line_offset'] > 0:
             lc.on = False
             q = dk.pose()
@@ -385,7 +454,7 @@ class TableDocker:
                         q[1] + c['line_offset'] * math.sin(goal[2]), c['v_line'])
         p = dk.pose()
         _, lat, dth = lane_offset(p, goal)
-        md.log(f'[정지선] {c["lines"]}번째 선에서 정지: 차선에서 옆 {lat * 1000:+.1f} mm, 방향 {math.degrees(dth):+.2f}° '
+        md.log(f'[정지선] {what}에서 정지: 차선에서 옆 {lat * 1000:+.1f} mm, 방향 {math.degrees(dth):+.2f}° '
                f'(정렬 끝에서 {math.hypot(p[0] - x0, p[1] - y0) * 100:.1f} cm)')
         return '성공'
 
