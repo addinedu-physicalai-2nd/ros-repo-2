@@ -43,7 +43,7 @@ from .undock import _set_size
 
 DEFAULTS = {
     'lines': 2,              # 몇 번째 선에서 정지
-    'entry_ahead': 0.08,     # 차선 올라타기 앞 거리 (m)
+    'entry_ahead': 0.05,     # 차선 올라타기 앞 거리 (m)
     'line_max': 0.40,        # 정렬 끝에서 선을 찾을 최대 거리 (m)
     'line_offset': 0.0,      # 선 감지 뒤 더 갈 거리 (m)
     'v_line': 0.04,          # 선 찾으며 직진 속도 (m/s): 설 선 근처
