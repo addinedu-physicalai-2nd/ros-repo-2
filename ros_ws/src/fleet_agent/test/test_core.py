@@ -1276,3 +1276,37 @@ def test_corridor_replace_to_same_dock_keeps_docking():
     run(r, d, 60, hook=hook)
     assert r.extends == [] and r.prec == ['N14:align', 'D3:corridor', 'D3:dock_in']
     assert reached(r) == ['N14', 'N15', 'D3'] and d.queue.cmd_id == 131
+
+
+def test_person_block_then_turnaround_backs_off_first():
+    # N2 -> N5 가다 카메라 사람(PERSON)으로 섬 -> 서버가 뒤(N2)로 새 길 (REPLACE) -> 제자리에서 돌기 전에 곧게 후진
+    r, d = make(1.50, -0.70, math.pi / 2, last_drive=FORWARD)
+    d.last_node = 'N2'
+    d.on_move(140, False, FORWARD, [('N5', 1.50, -0.33, math.pi / 2)], False, 'N5')
+    run(r, d, 1)
+    d.set_obstacle('PERSON')
+    run(r, d, 3)
+    d.set_obstacle('')
+    d.on_move(141, False, FORWARD, [('N2', 1.50, -0.78, -math.pi / 2), ('T1', 1.22, -0.93, 3.1)], False, 'T1')
+    seen = {'backoff': False, 'v': []}
+
+    def hook(t):
+        if d.phase == 'backoff':
+            seen['backoff'] = True
+            seen['v'].append(r.v)
+    run(r, d, 40, hook=hook)
+    assert seen['backoff'] and min(seen['v']) < 0                                    # 뒤로 감
+    assert 'REVERSE' in r.dirs
+    assert reached(r)[:1] == ['N2']
+
+
+def test_no_backoff_when_going_straight_on():
+    r, d = make(1.50, -0.70, math.pi / 2, last_drive=FORWARD)
+    d.last_node = 'N2'
+    d.on_move(142, False, FORWARD, [('N5', 1.50, -0.33, math.pi / 2)], False, 'N5')
+    run(r, d, 1)
+    d.set_obstacle('PERSON'); run(r, d, 3); d.set_obstacle('')
+    d.on_move(143, False, FORWARD, [('N5', 1.50, -0.33, math.pi / 2)], False, 'N5')   # 그대로 앞으로
+    phases = set()
+    run(r, d, 20, hook=lambda t: phases.add(d.phase))
+    assert 'backoff' not in phases

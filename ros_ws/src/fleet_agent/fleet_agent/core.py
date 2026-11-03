@@ -424,8 +424,15 @@ class Driver:
     def __init__(self, io, stops, pass_tol=0.08, yaw_tol=0.15, done_grace=0.5, reverse=None, policy=None,
                  nav_retries=1, check_turn_deg=45.0, check_gap=0.8, corridor=True,
                  loc_fwd=0.15, loc_speed=0.05, loc_spin_deg=360.0, loc_w=0.6, loc_settle=1.0, nav_ok_tol=0.10,
-                 check_every=False):
+                 check_every=False, backoff_m=0.12, backoff_v=0.05, backoff_sec=30.0, backoff_turn_deg=90.0):
         self.io = io
+        # 카메라(PERSON)로 막혀 섰던 자리에서 크게 돌아 다른 길로 갈 때: 제자리에서 돌면 몸(바구니 모서리)이 바로 앞
+        # 손님을 침 -> 먼저 backoff_m 곧게 후진 (뒤 LiDAR로 확인), 그다음 Nav2. 막힌 뒤 backoff_sec 안 · 그 자리 근처에서만
+        self.backoff_m, self.backoff_v = backoff_m, backoff_v
+        self.backoff_sec, self.backoff_turn = backoff_sec, math.radians(backoff_turn_deg)
+        self.person_at = None         # (시각, 그때 위치) 마지막으로 카메라 사람 때문에 막힌 때
+        self.backoff_from = None
+        self.backoff_until = 0.0
         # 위치 맞추기 (Control LOCALIZE): 앞으로 fwd -> 제자리 spin_deg -> settle초 멈춤 -> 뒤로 fwd -> LOCALIZED
         #   노드별 값은 precision_stops <노드>.localize: {fwd, spin_deg} (없으면 이 기본값)
         self.loc_fwd, self.loc_speed, self.loc_spin_deg = loc_fwd, loc_speed, loc_spin_deg
@@ -667,6 +674,8 @@ class Driver:
 
     def set_obstacle(self, kind):
         self.obstacle = kind or ''
+        if self.obstacle == 'PERSON':
+            self.person_at = (self.now, self._last_pose)
 
     # ------------------------------------------------------------ 상태
     def run_state(self):
@@ -736,6 +745,15 @@ class Driver:
                 self._guest_lost()
         elif self.phase == 'nav':
             self._tick_nav(pose)
+        elif self.phase == 'backoff':
+            d = math.hypot(pose[0] - self.backoff_from[0], pose[1] - self.backoff_from[1])
+            if d >= self.backoff_m or now >= self.backoff_until or self.obstacle:
+                self.io.cmd_vel(0.0, 0.0)
+                if self.obstacle:
+                    self.io.log(f'후진 중 뒤에 장애물 -> {d * 100:.0f} cm에서 그만')
+                self._begin_move(pose)   # person_at을 비웠으니 이번엔 바로 Nav2
+            else:
+                self.io.cmd_vel(-self.backoff_v, 0.0)
         elif self.phase == 'reverse':
             if self.axis is not None:
                 oy = self._odom_yaw()
@@ -961,6 +979,26 @@ class Driver:
         self._request_precision(True)
         return True
 
+    def _need_backoff(self, pose):
+        """카메라 사람으로 막혔던 자리에서 크게 돌아 나가야 하면 먼저 곧게 후진 (backoff) -> 시작했으면 True"""
+        if self.person_at is None or self.backoff_m <= 0:
+            return False
+        t, p0 = self.person_at
+        tx, ty = self._nav_xy()
+        if math.hypot(tx - pose[0], ty - pose[1]) < 0.10:
+            return False              # 목표가 바로 여기 (방향을 못 정함)
+        turn = abs(wrap(math.atan2(ty - pose[1], tx - pose[0]) - pose[2]))
+        if (self.now - t > self.backoff_sec or math.hypot(pose[0] - p0[0], pose[1] - p0[1]) > 0.10
+                or turn < self.backoff_turn):
+            return False
+        self.person_at = None         # 한 번만
+        self.backoff_from = (pose[0], pose[1])
+        self.backoff_until = self.now + max(2.0, 3.0 * self.backoff_m / max(self.backoff_v, 1e-3))
+        self.phase = 'backoff'
+        self.io.direction('REVERSE')  # 뒤 LiDAR로 확인 (obstacle 노드)
+        self.io.log(f'앞 손님 옆에서 {math.degrees(turn):.0f}° 돌아야 함 -> 먼저 {self.backoff_m * 100:.0f} cm 후진')
+        return True
+
     def _dock_turnback(self, pose):
         """도크(D1 · D2 · D3)로 들어갈 차례인데 바로 다음이 지금 노드로 되돌아오는 길 (복귀 중 새 안내 · 서빙이 붙음):
         도크에 안 들어가고 지나간 것으로 친 뒤 이어 감 (도킹했다 빠지기 안 함)
@@ -1016,6 +1054,8 @@ class Driver:
                 self.io.precision(dict(self.table_req))
                 return
             # ↑↑↑ 추가 끝
+            if self._need_backoff(pose):
+                return
             self.phase = 'nav'  # nav_go 결과가 바로 와도 받을 수 있게 먼저
             self.nav_state = 'running'
             self.nav_tries = 0
