@@ -1107,3 +1107,27 @@ def test_entrance_docking_cut_before_pocket_exits_at_cross():
     assert (DOCKED, 'D1') not in ev
     assert reached(r) == ['N1', 'D1', 'N1']
     assert [n for t, n, _ in r.events if t == CMD_DONE] == ['N1']
+def test_goal_facing_back_turns_one_way_not_nav2():
+    # N1에 도착해 들어온 방향의 반대(키오스크 쪽)를 봐야 할 때: Nav2에는 들어온 방향으로 세우고,
+    # 도착 뒤 한 방향으로만 돎 (180도 근처에서 좌우로 흔들리지 않게)
+    r, d = make(1.836, 0.40, -math.pi / 2, last_drive=FORWARD)   # D1 쪽(교점)에서 N1 쪽(-y)을 보고 출발
+    d.prev_xy = (1.836, 0.40)
+    face_d1 = math.pi / 2 + 0.02                                 # N1 -> D1 쪽 (거의 정반대)
+    navs, ws = [], []
+    orig = r.nav_go
+    r.nav_go = lambda x, y, yaw: (navs.append(yaw), orig(x, y, yaw))
+    d.on_move(95, False, FORWARD, [('N1', 1.836, -0.82, face_d1)], False, 'N1')
+    run(r, d, 30, hook=lambda t: ws.append(r.w) if d.phase == 'final_turn' else None)
+    assert abs(wrap(navs[0] - (-math.pi / 2))) < 0.05, 'Nav2 목표는 들어온 방향'
+    turn_ws = [w for w in ws if abs(w) > 1e-9]
+    assert turn_ws and (all(w > 0 for w in turn_ws) or all(w < 0 for w in turn_ws)), '한 방향으로만 돎'
+    assert abs(wrap(r.yaw - face_d1)) < 0.2
+    assert [n for t, n, _ in r.events if t == CMD_DONE] == ['N1']
+
+
+def test_turn_command_direction_latched_near_pi():
+    # 오차가 +pi 근처에서 -pi로 뒤집혀도 정한 방향(+1)으로 계속 돎
+    from fleet_agent.core import turn_command
+    w1, _ = turn_command(0.0, math.pi - 0.01, direction=1)
+    w2, _ = turn_command(0.0, -math.pi + 0.01, direction=1)
+    assert w1 > 0 and w2 > 0

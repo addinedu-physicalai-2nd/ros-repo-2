@@ -128,11 +128,14 @@ class ReverseControl:
         return -min(self.speed, max(0.02, remain)), w, False
 
 
-def turn_command(yaw, target, k=1.8, max_w=0.8, tol=0.08):
-    """제자리 회전 -> (w, done)"""
+def turn_command(yaw, target, k=1.8, max_w=0.8, tol=0.08, direction=0):
+    """제자리 회전 -> (w, done)
+    direction(+1 / -1)을 주면 그쪽으로만 돈다: 거의 180도 돌 때 오차 부호가 ±pi에서 뒤집혀 좌우로 왔다 갔다 하지 않게"""
     err = wrap(target - yaw)
     if abs(err) < tol:
         return 0.0, True
+    if direction and abs(err) > math.pi / 2 and math.copysign(1, err) != direction:
+        err += 2 * math.pi * direction
     w = clamp(k * err, max_w)
     if abs(w) < 0.15:
         w = math.copysign(0.15, w)  # 너무 느리면 안 돈다
@@ -360,6 +363,9 @@ class Driver:
         #                               guide_greet / guide_turn / guide_watch (안내)
         self.after_turn = ''          # turn 끝나고: move / finish
         self.turn_target = 0.0
+        self.turn_dir = 0             # 지금 회전 방향 (+1 / -1). 회전 목표가 바뀌면 처음 오차 부호로 정하고 끝까지 유지
+        self.turn_for = None          # turn_dir을 정한 회전 목표
+        self.big_turn = None          # 도착지에서 크게(약 140도 넘게) 돌아야 할 yaw: Nav2 대신 직접 (Nav2는 180도에서 좌우로 흔들림)
         self.seg_start = None
         self.last_drive = None        # 마지막으로 달린 방향 (방향 바뀜 판단)
         self.last_node = ''
@@ -371,6 +377,7 @@ class Driver:
         self.obstacle = ''            # 지금 진행 방향 장애물 종류 ('' = 없음)
         self.holding = False          # 장애물로 멈춘 중
         self.now = 0.0
+        self.big_turn_rad = math.radians(140.0)   # 도착 yaw가 들어온 방향과 이보다 크게 다르면 Nav2 대신 직접 돎
         self.nav_retries = nav_retries  # Nav2 실패 때 다시 보내는 횟수 (그래도 안 되면 CMD_FAILED)
         self.nav_tries = 0
         self.nav_ok_tol = nav_ok_tol    # Nav2가 성공이라는데 노드에서 이보다 멀면 믿지 않고 다시 보냄 (목표 바꿀 때 옛 목표 성공이 섞임)
@@ -611,7 +618,12 @@ class Driver:
             if len(self.queue) and not self._late_check(pose):
                 self._start_next(pose)
         elif self.phase in ('turn', 'final_turn', 'guide_turn'):
-            w, done = turn_command(pose[2], self.turn_target, tol=self.yaw_tol)
+            if self.turn_for is None or abs(wrap(self.turn_for - self.turn_target)) > 1e-6:
+                self.turn_for = self.turn_target
+                self.turn_dir = 1 if wrap(self.turn_target - pose[2]) >= 0 else -1
+            w, done = turn_command(pose[2], self.turn_target, tol=self.yaw_tol, direction=self.turn_dir)
+            if done:
+                self.turn_for = None
             self.io.cmd_vel(0.0, w)
             if done:
                 self.io.cmd_vel(0.0, 0.0)
@@ -954,6 +966,12 @@ class Driver:
             self.turn_target = self.cur.yaw  # FORWARD는 Nav2가 이미 맞춤
             self.phase = 'final_turn'
             return
+        if self.cur.drive == FORWARD and self.big_turn is not None:
+            target, self.big_turn = self.big_turn, None
+            if abs(wrap(target - pose[2])) > self.yaw_tol:
+                self.turn_target = target    # Nav2는 들어온 방향으로 세우고 여기서 한 방향으로 크게 돎 (예: N1에서 키오스크 쪽)
+                self.phase = 'final_turn'
+                return
         self._precision_or_done()
 
     def _precision_or_done(self):
@@ -1015,6 +1033,14 @@ class Driver:
         """Nav2 목표 yaw: 다음이 정밀 정차할 테이블(도착지)이고 precision_stops에 face(테이블 모서리)가 있으면
         그 점을 바라봄 (마커가 바로 앞에 오게). 아니면 서버가 준 yaw (다음 노드 쪽)"""
         nxt = self.queue.steps[0] if len(self.queue) else None
+        self.big_turn = None
+        cur = self.cur
+        if (cur.drive == FORWARD and nxt is None and self._at_goal(cur) and self.prev_xy is not None
+                and math.hypot(cur.x - self.prev_xy[0], cur.y - self.prev_xy[1]) > 0.05):
+            came = math.atan2(cur.y - self.prev_xy[1], cur.x - self.prev_xy[0])
+            if abs(wrap(cur.yaw - came)) > self.big_turn_rad:
+                self.big_turn = cur.yaw          # 도착 뒤 직접 돎 (_finish)
+                return came
         if self._table_next(nxt):
             f = self.stops.get(nxt.node_id, {}).get('face')
             if f:
