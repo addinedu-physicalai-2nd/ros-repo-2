@@ -208,14 +208,17 @@ def near_box(boxes, min_h=0.20, x_band=0.30, bottom=0.85):
 class CamBlockGate:
     """주행 중 카메라(YOLO) 멈춤 판단. 멈출 때는 깐깐하게, 풀 때는 더 깐깐하게 (깜빡임 · 가까워서 놓침 · 옆으로 비킴에 안 풀림)
     update(dets, now) -> (near, box): dets = [((x1, y1, x2, y2) 0~1, conf)]
-    - 멈춤: conf >= conf_on, 화면을 덮는 큰 박스(area > max_area, 오검출)는 뺌 -> near_box가 on_n번 연속이면 멈춤
+    - 멈춤: conf >= conf_on, 화면을 덮는 큰 박스(area > max_area, 오검출)는 뺌 -> 최근 on_window장 중 on_n장에서
+            near_box가 나오면 멈춤 (연속이 아니어도 됨: conf가 장마다 출렁여 한 장 놓쳐도 다시 0부터 세지 않게)
     - 유지: 길 위 가까운 박스, 또는 conf(기본 conf) 이상 박스가 가운데 ±release_x · 아래끝 release_bottom 아래에 하나라도 있으면
     - 가까워서 놓침: 마지막으로 본 박스가 화면 아래 끝(lost_bottom)에 닿았거나 컸으면(lost_h) lost_hold초 동안은 있다고 봄
     - 풂: 위가 다 아니고 clear_n번 연속"""
 
     def __init__(self, conf_on=0.70, on_n=2, clear_n=8, min_h=0.20, x_band=0.30, bottom=0.85, release_x=0.45,
-                 release_bottom=0.50, max_area=0.45, lost_hold=2.0, lost_bottom=0.95, lost_h=0.45):
+                 release_bottom=0.50, max_area=0.45, lost_hold=2.0, lost_bottom=0.95, lost_h=0.45, on_window=3):
         self.conf_on, self.on_n, self.clear_n = conf_on, on_n, clear_n
+        self.on_window = max(on_n, on_window)
+        self.hits = []               # 멈추기 전 최근 on_window장: 길 위 가까운 박스가 있었나
         self.min_h, self.x_band, self.bottom = min_h, x_band, bottom
         self.release_x, self.release_bottom, self.max_area = release_x, release_bottom, max_area
         self.lost_hold, self.lost_bottom, self.lost_h = lost_hold, lost_bottom, lost_h
@@ -231,17 +234,20 @@ class CamBlockGate:
 
     def reset(self):
         self.near, self.on_count, self.clear_count, self.last_seen, self.why = False, 0, 0, None, ''
+        self.hits = []
 
     def update(self, dets, now):
         ok = [(b, c) for b, c in dets if self._area(b) <= self.max_area]          # 화면을 덮는 박스 = 오검출
         strong = [b for b, c in ok if c >= self.conf_on]
         box = near_box(strong, self.min_h, self.x_band, self.bottom)
         if not self.near:
-            self.on_count = self.on_count + 1 if box is not None else 0
-            if self.on_count >= self.on_n:
-                self.near, self.clear_count, self.why = True, 0, 'seen'
+            self.hits = (self.hits + [box is not None])[-self.on_window:]
+            self.on_count = sum(self.hits)
+            if self.on_count >= self.on_n and box is not None:
+                self.near, self.clear_count, self.why, self.hits = True, 0, 'seen', []
                 self.last_seen = (now, box)
-            return self.near, box
+                return True, box
+            return False, None       # 아직 확정 전: 박스를 돌려주지 않음 (사진 · 팝업은 멈출 때만)
         keep = box
         if keep is None:
             keep = next((b for b, c in ok if abs((b[0] + b[2]) / 2 - 0.5) <= self.release_x
@@ -256,7 +262,7 @@ class CamBlockGate:
                 return True, None                                                   # 너무 가까워 안 보이는 것
         self.clear_count += 1
         if self.clear_count >= self.clear_n:
-            self.near, self.on_count, self.last_seen, self.why = False, 0, None, ''
+            self.near, self.on_count, self.last_seen, self.why, self.hits = False, 0, None, '', []
             return False, None
         return True, None
 

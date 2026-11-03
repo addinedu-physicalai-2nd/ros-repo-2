@@ -59,8 +59,9 @@ class GuideNode(Node):
         self.clear_count = 0
         self.cam_block_x = float(p('cam_block_x', 0.30).value)       # 박스 가운데가 화면 가운데에서 이 안 = 가는 길 위
         self.gate = CamBlockGate(
-            conf_on=float(p('cam_block_conf', 0.70).value),           # 멈출 때 conf (손님 찾기 conf보다 높게: 헛것에 안 멈춤)
-            on_n=int(p('cam_block_on_n', 2).value),                   # 연속 이만큼 보여야 멈춤
+            conf_on=float(p('cam_block_conf', 0.65).value),           # 멈출 때 conf (손님 찾기 conf보다 높게: 헛것에 안 멈춤)
+            on_n=int(p('cam_block_on_n', 2).value),                   # 최근 cam_block_on_window장 중 이만큼 보이면 멈춤
+            on_window=int(p('cam_block_on_window', 3).value),
             clear_n=self.cam_clear_n, min_h=self.cam_block_h, x_band=self.cam_block_x, bottom=self.cam_block_bottom,
             release_x=float(p('cam_release_x', 0.45).value),          # 멈춘 뒤에는 이만큼 옆까지 보이면 안 풂 (비켜 가다 옆으로 침)
             release_bottom=float(p('cam_release_bottom', 0.50).value),  # 그리고 박스 아래끝이 화면 이만큼 아래 (가까움)
@@ -176,7 +177,8 @@ class GuideNode(Node):
                 self.get_logger().info('카메라: 너무 가까워 안 보임 -> 아직 앞에 있다고 봄')
             elif self.gate.why != 'lost_close':
                 self._lost_logged = False
-            if box is not None and self.obstacle_snap and (not was_near or now - self.snap_t >= self.obstacle_snap_every):
+            if (near and box is not None and self.obstacle_snap
+                    and (not was_near or now - self.snap_t >= self.obstacle_snap_every)):   # 멈출 때만 사진 (팝업 = 실제 멈춤)
                 self.snap_t = now
                 self.publish_snap(img, dets, box)
         if self.blocked and (lidar or fwd):

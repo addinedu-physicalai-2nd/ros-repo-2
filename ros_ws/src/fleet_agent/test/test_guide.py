@@ -289,7 +289,7 @@ def test_gate_needs_two_strong_frames_and_ignores_low_conf_and_huge_box():
     g = CamBlockGate()
     assert g.update([((0.45, 0.55, 0.55, 0.92), 0.60)], 0.0) == (False, None)      # conf 낮음
     assert g.update([((0.0, 0.0, 1.0, 1.0), 0.90)], 0.1)[0] is False                 # 화면 덮는 박스 = 오검출
-    assert g.update([NEAR], 0.2)[0] is False                                         # 한 장만으로는 안 멈춤
+    assert g.update([NEAR], 0.2) == (False, None)                                    # 한 장만으로는 안 멈춤 (박스도 안 줌)
     assert g.update([NEAR], 0.3)[0] is True
 
 
@@ -309,3 +309,14 @@ def test_gate_holds_when_lost_close():
     assert g.update([], 0.5)[0] is True and g.update([], 0.9)[0] is True              # 가까워 안 보임 -> 유지
     assert g.update([], 1.2)[0] is True                                              # 시간 지나고 1번째 안 보임
     assert g.update([], 1.3)[0] is False
+
+
+def test_gate_two_of_three_not_consecutive():
+    g = CamBlockGate()
+    assert g.update([NEAR], 0.0)[0] is False
+    assert g.update([], 0.1)[0] is False                                             # 한 장 놓침
+    near, box = g.update([NEAR], 0.2)
+    assert near is True and box is not None                                          # 3장 중 2장 -> 멈춤
+    g2 = CamBlockGate()
+    g2.update([NEAR], 0.0); g2.update([], 0.1); g2.update([], 0.2)
+    assert g2.update([NEAR], 0.3)[0] is False                                        # 창 밖으로 밀려남 -> 아직
