@@ -12,10 +12,6 @@
     <div class="bar-left">
       <div class="brand"><span class="brand-mark"></span>핑키토랑</div>
       <span class="bar-sub">매장관리</span>
-      <nav class="tabs" role="tablist">
-        <button class="tab on" data-tab="ops" role="tab">운영</button>
-        <button class="tab" data-tab="ctl" role="tab">관제</button>
-      </nav>
     </div>
     <div class="bar-right">
       <span id="clock" class="clock num"></span>
@@ -27,16 +23,12 @@
 
   <div id="alerts" class="alerts"></div>
 
-  <div class="layout" id="opsView">
-    <main class="main">
+  <!-- 한 화면: 왼쪽 주문 · 작업판 | 가운데 관제 맵 | 오른쪽 테이블 · 로봇 -->
+  <div class="one">
+    <aside class="one-left">
       <section>
         <div class="sec-head"><h2>확인 필요</h2><span id="confirmCount" class="count num"></span></div>
         <div id="confirms" class="confirms"></div>
-      </section>
-
-      <section>
-        <div class="sec-head"><h2>테이블</h2></div>
-        <div id="tables" class="tables"></div>
       </section>
 
       <section class="board">
@@ -57,17 +49,10 @@
           <div id="colDone" class="cards"></div>
         </div>
       </section>
-    </main>
-
-    <aside class="side">
-      <div class="sec-head"><h2>로봇</h2></div>
-      <div id="robots" class="robots"></div>
     </aside>
-  </div>
 
-  <!-- 관제: 노드 격자 위에 로봇별 잠근 길(진한 선) · 예정 길(점선) · 잠근 노드 · 위치 -->
-  <div class="ctl" id="ctlView" hidden>
-    <section class="ctl-map-card">
+    <!-- 관제: 노드 격자 위에 로봇별 잠근 길(진한 선) · 예정 길(점선) · 잠근 노드 · 위치 -->
+    <section class="ctl-map-card" id="ctlView">
       <div class="sec-head">
         <h2>관제 맵</h2>
         <span id="ctlInfo" class="count"></span>
@@ -86,9 +71,16 @@
         <span><i class="lg obst"></i>장애물</span>
       </div>
     </section>
-    <aside class="ctl-side">
-      <div class="sec-head"><h2>로봇 경로</h2></div>
-      <div id="ctlRobots" class="ctl-robots"></div>
+
+    <aside class="one-right">
+      <section>
+        <div class="sec-head"><h2>테이블</h2></div>
+        <div id="tables" class="tables"></div>
+      </section>
+      <section>
+        <div class="sec-head"><h2>로봇</h2></div>
+        <div id="robots" class="robots"></div>
+      </section>
     </aside>
   </div>
 

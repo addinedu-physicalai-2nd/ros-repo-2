@@ -215,7 +215,7 @@ function renderTables() {
 
 // ---------- 로봇 상태판 ----------
 function renderRobots() {
-  setHtml('robots', state.robots.map((r) => {
+  setHtml('robots', robotList().map((r) => {
     const online = r.online !== false;
     const st = online ? r.state : 'OFFLINE';
     const t = r.task_id != null ? taskById(r.task_id) : null;
@@ -229,10 +229,11 @@ function renderRobots() {
         </div>
         <dl class="robot-meta">
           <dt>작업</dt><dd>${t ? `${esc(t.table || '')} ${KIND_TEXT[t.kind] || ''} · ${STAGE_TEXT[t.stage] || esc(t.stage)}` : (r.task_id != null ? `#${esc(r.task_id)}` : '없음')}</dd>
-          <dt>마지막 노드</dt><dd class="num">${esc(r.last_node || '-')}</dd>
-          <dt>다음 · 목적지</dt><dd class="num">${r.goal_node ? `${esc(r.next_node || '-')} → ${esc(r.goal_node)}` : '-'}</dd>
           <dt>배터리</dt><dd class="batt"><span class="batt-bar"><i class="${batt < 30 ? 'low' : ''}" style="width:${Math.max(0, Math.min(100, batt))}%"></i></span><span class="num">${batt}%</span></dd>
         </dl>
+        <div class="route">${routeHtml(r)}</div>
+        ${online && waitInfo(r) ? `<div class="ctl-wait">${esc(waitInfo(r).text)}</div>` : ''}
+        ${BOTS[r.id] && BOTS[r.id].reroutedUntil > Date.now() ? `<div class="ctl-reroute">↻ 경로 변경 · 예전 ${esc((BOTS[r.id].reroutedFrom || []).join(' › '))}</div>` : ''}
         <div class="robot-actions">
           ${r.state === 'PAUSED'
             ? `<button class="btn btn-ghost" data-act="robot" data-robot="${esc(r.id)}" data-cmd="RESUME">재개</button>`
@@ -319,15 +320,6 @@ const CTL_GRID = {
 };
 const CTL = { map: null, nodes: {}, grid: {}, S: 120, SX: 120, SY: 120, PAD: 56, c0: 0, r0: 0, w: 0, h: 0, fit: null };
 
-document.querySelectorAll('.tab').forEach((b) => b.addEventListener('click', () => showTab(b.dataset.tab)));
-function showTab(tab) {
-  document.querySelectorAll('.tab').forEach((b) => b.classList.toggle('on', b.dataset.tab === tab));
-  $('opsView').hidden = tab !== 'ops';
-  $('ctlView').hidden = tab !== 'ctl';
-  try { localStorage.setItem('storeTab', tab); } catch (_) { /* 저장 안 돼도 됨 */ }
-  if (tab === 'ctl') { renderCtl(); startAnim(); }
-}
-try { if (localStorage.getItem('storeTab') === 'ctl') showTab('ctl'); } catch (_) { /* 기본 운영 탭 */ }
 
 loadMap();
 async function loadMap() {
@@ -385,10 +377,10 @@ function robotPoint(r) {
 const f1 = (v) => v.toFixed(1);
 
 function renderCtl() {
-  if (!CTL.map || $('ctlView').hidden) return;
+  if (!CTL.map) return;
   renderCtlStatic();
   renderCtlDyn();
-  renderCtlSide();
+  renderRobots();     // 로봇 카드의 경로 · 대기 · 경로 변경 (맵과 같은 순간 값)
 }
 
 // 테이블 몸통 (정사각형, T 노드 왼쪽 = 통로 쪽 모서리에 붙음)
@@ -528,29 +520,15 @@ function renderCtlDyn() {
     (obstText ? ` · 장애물 ${obstText}` : '');
 }
 
-function renderCtlSide() {
-  setHtml('ctlRobots', robotList().map((r) => {
-    const online = r.online !== false;
-    const st = online ? r.state : 'OFFLINE';
-    const committed = r.committed || [], plan = r.plan || [];
-    const chip = (id, cls) => `<span class="n ${cls}${id === r.goal_node ? ' goal' : ''}">${esc(id)}</span>`;
-    const parts = [];
-    if (r.last_node) parts.push(chip(r.last_node, 'at'));
-    committed.forEach((n) => parts.push(chip(n, 'lock')));
-    plan.forEach((n) => parts.push(chip(n, 'plan')));
-    const route = parts.length > 1 ? parts.join('<span class="arr">›</span>') : (parts[0] || '') + (r.goal_node ? '' : ' <span class="arr">대기 중</span>');
-    return `
-      <div class="ctl-robot ${online ? '' : 'offline'}" style="--rc:${robotColor(r.id)}">
-        <div class="robot-head">
-          <span class="robot-name">${esc(r.id)}</span>
-          <span class="badge ${esc(st)}">${online ? (ROBOT_STATE[r.state] || esc(r.state)) : '통신 끊김'}</span>
-          ${r.goal_node ? `<span class="count">→ ${esc(r.goal_node)}</span>` : ''}
-        </div>
-        <div class="route">${route}</div>
-        ${waitInfo(r) ? `<div class="ctl-wait">${esc(waitInfo(r).text)}</div>` : ''}
-        ${BOTS[r.id] && BOTS[r.id].reroutedUntil > Date.now() ? `<div class="ctl-reroute">↻ 경로 변경 · 예전 ${esc((BOTS[r.id].reroutedFrom || []).join(' › '))}</div>` : ''}
-      </div>`;
-  }).join('') || '<div class="empty">로봇 정보가 아직 없어요</div>');
+// 로봇 카드의 경로 줄: 지금 노드 › 잠근 길 › 예정 길 (목적지는 테두리)
+function routeHtml(r) {
+  const committed = r.committed || [], plan = r.plan || [];
+  const chip = (id, cls) => `<span class="n ${cls}${id === r.goal_node ? ' goal' : ''}">${esc(id)}</span>`;
+  const parts = [];
+  if (r.last_node) parts.push(chip(r.last_node, 'at'));
+  committed.forEach((n) => parts.push(chip(n, 'lock')));
+  plan.forEach((n) => parts.push(chip(n, 'plan')));
+  return parts.length > 1 ? parts.join('<span class="arr">›</span>') : (parts[0] || '') + (r.goal_node ? '' : ' <span class="arr">대기 중</span>');
 }
 
 // ---------- 관제 애니메이션 ----------
@@ -637,7 +615,6 @@ function startAnim() {
 }
 
 function animFrame(now) {
-  if ($('ctlView').hidden) { animOn = false; return; }      // 관제 탭이 아니면 멈춤 (탭 열 때 다시 시작)
   const dt = Math.min(0.1, (now - animLast) / 1000);
   animLast = now;
   const k = 1 - Math.exp(-dt * 8);                           // 목표까지 남은 거리의 이만큼씩 (0.2초 정도에 거의 도착)
