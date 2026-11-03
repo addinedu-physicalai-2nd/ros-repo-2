@@ -792,6 +792,22 @@ void TaskManager::rebalanceStandby() {
   }
 
   if (have > want) {
+    // 입구 도크로 돌아가는 중인 로봇부터 돌린다 (만석이 됨 등): 들어가 도킹했다 다시 빠져 픽업 쪽으로 가지 않게
+    for (auto& pair : robots_) {
+      Robot& r = pair.second;
+      if (!robotUsable(r) || r.charging || traffic_.isStationary(r.id)) continue;
+      if (!dispatch_.isEntranceDock(traffic_.goalOf(r.id))) continue;
+      Task* t = findTask(r.task_id);
+      bool returning = t ? (t->stage == Stage::TO_DOCK) : r.homing;  // 안내하러 나가는 로봇은 그대로
+      if (!returning) continue;
+      std::string dock = dispatch_.pickDock(r.id, false);
+      if (dock.empty() || dispatch_.isEntranceDock(dock)) break;  // 픽업 쪽이 꽉 참
+      if (redirectDock(r, dock)) {
+        record("TASK", r.id + " 입구로 돌아가다 픽업 쪽 대기로 바꿈 -> " + dock + " (입구 " + std::to_string(have) + "/" +
+                           std::to_string(want) + ")");
+        return;
+      }
+    }
     for (const std::string& entrance : cfg_.entrance_docks) {  // 앞칸 로봇부터 (뒤칸은 앞칸이 비어야 나옴)
       for (auto& pair : robots_) {
         Robot& r = pair.second;
