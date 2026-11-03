@@ -274,8 +274,9 @@ class Entrance(Steps):
         rel = md.rot(-phi) @ (np.array(p[:2]) - D)
         return {'gx': float(rel[0]), 'gy': float(rel[1]), 'gth': md.wrap(p[2] - phi), 'fx': md.FX, 'size': 0.025}
 
-    def back_to(self, tz_goal, h_w, tag):
-        """서쪽 벽과 수직(h_w) 그대로 곧게 후진해 마커 1이 tz_goal인 곳 (멈춰서 재고 앞뒤만 고침)"""
+    def back_to(self, tz_goal, h_w, tag, tol_m=0.003, trust_m=0.0):
+        """서쪽 벽과 수직(h_w) 그대로 곧게 후진해 마커 1이 tz_goal인 곳 (멈춰서 재고 앞뒤만 고침)
+        tol_m 안이면 안 움직임. 움직인 거리가 trust_m 안이면 odom을 믿고 다시 재지 않음"""
         m = None
         for k in range(1, 4):
             self.mv.dk.rotate_to(h_w)
@@ -284,9 +285,11 @@ class Entrance(Steps):
                 raise RuntimeError(f'{tag}: 마커 1이 안 보임')
             d = m['tz'] - tz_goal
             self.log(f'[{tag} {k}] 마커 1 {m["tz"] * 100:.1f} cm (목표 {tz_goal * 100:.1f}), 옆 {m["tx"] * 1000:+.0f} mm')
-            if abs(d) < 0.003:
+            if abs(d) < tol_m:
                 break
             self.mv.move_along(d, h_w)
+            if abs(d) < trust_m:
+                break
         self.mv.dk.rotate_to(h_w)
         return m
 
@@ -404,7 +407,8 @@ class Entrance(Steps):
         t0 = time.time()
         # 앞 벽 수직부터 (라이다): 주차 중에 끊겨 비스듬히 서 있어도 곧게 나옴. 이미 수직이면 1초 재고 끝
         h_w = self.front_square('빠지기 벽 수직')
-        m = self.back_to(rec['line_tz'], h_w, '교점으로 전진')
+        # 1 cm 안이면 됨, 20 cm 안 이동은 odom을 믿고 다시 재지 않음 (빠진 뒤는 Nav2가 받음. 예전: 4 mm까지 2~3번 멈춰 재서 5~7초)
+        m = self.back_to(rec['line_tz'], h_w, '교점으로 전진', tol_m=0.01, trust_m=0.20)
         if m is not None:
             self.log(f'[교점] 마커 1 옆 기록과 {(m["tx"] - rec.get("line_tx", m["tx"])) * 1000:+.0f} mm (확인만)')
         h_n = md.wrap(h_w - math.pi / 2)                  # 북쪽 = 서쪽에서 우90

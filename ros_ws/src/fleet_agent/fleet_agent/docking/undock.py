@@ -74,7 +74,7 @@ def _go_to(mv, x, y, vmax):
 
 
 def undock(node, pub, cancelled, tf_buf, cam, req, lidar=None):
-    log = node.get_logger().info
+    log = md.log      # 터미널 + ~/dock_logs/<..>_undock_v4/run.log (예전: 터미널에만 찍혀서 run.log가 비었음)
     mv = Motion(node, pub, cancelled, tf_buf, None, dict(DEFAULTS))
     mv.dk.wait_pose()
     marker = int(req['marker'])

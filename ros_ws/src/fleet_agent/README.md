@@ -99,6 +99,7 @@ ros2 run fleet_agent marker_dock --dry-run --id 3     # 계획만 보기
 ```
 - 목표 파일은 마커 ID별이다 (D1 `--id 1`). 주방 통로 쪽(N14 · D3 · D2)은 아래 `dock_record`로 기록한다
 - 도킹 로그 · 사진은 `~/dock_logs/`에 도킹마다 남는다
+- 정밀 동작 한 번마다 `~/dock_logs/summary.csv`에 한 줄 (시각 · 로봇 · 노드 · method · 결과 ok/fail/timeout/cancelled · 소요초 · 실패 이유 · 로그폴더). 단계별 시간은 그 폴더의 `run.log`
 
 ## 주방 통로 · 픽업 · 도크 (N13 → N14 → N15/N16 → P2 → P1 → N4)
 

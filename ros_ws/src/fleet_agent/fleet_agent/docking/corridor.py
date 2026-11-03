@@ -67,14 +67,19 @@ PARK_ALPHA = 0.25
 BAR_BLACK = 3800      # 가로선 문턱 (테이프 4095, 튀는 값 ~3500, 흰 바닥 ~240)
 BAR_CONFIRM = 2       # 연속 이만큼 검검검이어야 선
 BAR_KIND = {'N15': 'bar', 'N16': 'bar', 'P2': 'dist', 'P1': 'bar'}
-BAR_GAP = {'N15': 0.40, 'N16': 0.15, 'P2': 0.48, 'P1': 0.44}   # 앞 노드에서 거리 m (N14->N15 · N15->N16 바닥 기록 실측)
+BAR_GAP = {'N15': 0.36, 'N16': 0.15, 'P2': 0.48, 'P1': 0.37}   # 앞 노드에서 거리 m
+# (11/3 pinky2 로그 실측: N14->N15 35.9 · 36.4 cm, P2->P1 35.9 · 36.8 cm. 예전 값 0.40 · 0.44는 실제보다 길었음)
 W_REF = 0.173         # 서쪽 칸막이에서 로봇 중심까지 = 통로 가운데 (남쪽을 보면 오른쪽 벽)
 EARLY = 0.5
 MISS_M = 0.10
 RESYNC_M = 0.12
 START_GUARD_M = 0.06  # 출발 자리가 선 근처인데 선 위가 아니었으면, 이 안에서 밟는 선은 출발 자리 선
-V_BAR_SLOW = 0.04     # 서야 할 선 근처 (그리고 P2 -> P1)
+V_BAR_SLOW = 0.04     # 서야 할 선 근처
 SLOW_M = 0.06
+PARK_RETRIES = 1      # 주차 실패 시 시작 자리로 돌아가 다시 하는 횟수
+P1_SLOW_M = 0.10     # P1은 예상 선 10 cm 앞부터만 천천히 (예전: P2 -> P1 내내 4 cm/s라 약 9초)
+PRE_WAIT_S = 0.5      # 출발 전 벽 방향: 이 안에 벽이 한 번도 안 잡히면 기다리지 않고 출발 (N14는 벽이 안 보임)
+PRE_MAX_DEG = 5.0     # 출발 전 벽 방향 고침이 이보다 크면 잘못 본 것으로 보고 안 고침 (11/2 N14에서 +14.6° 틀었다 되돌림)
 
 
 def bearing(m):
@@ -110,6 +115,15 @@ def bar_update(ir, v):
         ir['white'] = ir.get('white', 0) + 1 if ir['on'] else 0
         if ir['on'] and ir['white'] >= 2:
             ir['on'], ir['white'] = False, 0
+
+
+def bar_vmax(nxt, stop, left):
+    """통로 후진 최고 속도: 다음 노드 nxt가 설 곳(stop)이고 예상 선까지 left(m)가 가까우면 천천히
+    P1은 P1_SLOW_M(10 cm) 앞부터, 다른 선은 SLOW_M. 거리로 서는 노드(P2)는 남은 거리만큼 줄임"""
+    vmax = V_BAR_SLOW if (nxt == stop and left < (P1_SLOW_M if nxt == 'P1' else SLOW_M)) else FOLLOW_V
+    if nxt == stop and BAR_KIND.get(nxt, 'dist') == 'dist':
+        vmax = min(vmax, 0.02 + 1.5 * max(0.0, left))
+    return vmax
 
 
 def align_record(mid, size, m):
@@ -239,8 +253,9 @@ class Steps:
         d = np.array(p[:2]) - np.array(goal[:2])
         return float(np.array([-n[1], n[0]]) @ d), float(-(n @ d)), md.wrap(p[2] - goal[2])
 
-    def face(self, ref, tag, find=False):
-        """기록 자세의 방향으로 (제자리 회전만). 가까우면 벽 기울기, 멀면 방위각"""
+    def face(self, ref, tag, find=False, tol_deg=TOL_DEG, verify_deg=VERIFY_DEG):
+        """기록 자세의 방향으로 (제자리 회전만). 가까우면 벽 기울기, 멀면 방위각
+        tol_deg 안이면 안 돎, verify_deg 안이면 한 번 돌고 다시 재지 않음 (다음 단계가 또 고치는 곳은 느슨하게)"""
         for k in range(1, 4):
             m = self.see(ref['id'], ref.get('size', 0.025), find=find and k == 1)
             if m is None:
@@ -251,14 +266,15 @@ class Steps:
                      f'마커 {m["tz"] * 100:.1f} cm)')
             if abs(math.degrees(err)) > MAX_DEG:
                 raise RuntimeError(f'{tag}: 방향 오차 {math.degrees(err):+.0f}° (시작 자세 · 기록 확인)')
-            if abs(math.degrees(err)) < TOL_DEG:
+            if abs(math.degrees(err)) < tol_deg:
                 return
             self.mv.dk.rotate_to(md.wrap(self.mv.dk.pose()[2] + err))
-            if abs(math.degrees(err)) < VERIFY_DEG:
+            if abs(math.degrees(err)) < verify_deg:
                 return
 
-    def reach(self, ref, tag, vmax=V_FAR):
-        """마커 거리(tz)를 기록값까지 지금 방향 그대로 앞뒤로"""
+    def reach(self, ref, tag, vmax=V_FAR, tol_m=FIX_M, trust_m=0.0):
+        """마커 거리(tz)를 기록값까지 지금 방향 그대로 앞뒤로
+        tol_m 안이면 안 움직임. 움직인 거리가 trust_m 안이면 odom을 믿고 다시 재지 않음 (짧은 이동은 odom이 정확)"""
         for k in range(1, 4):
             m = self.see(ref['id'], ref.get('size', 0.025))
             if m is None:
@@ -266,9 +282,11 @@ class Steps:
             d = m['tz'] - ref['tz']
             self.log(f'[{tag}] 거리 {m["tz"] * 100:.1f} cm (목표 {ref["tz"] * 100:.1f}) -> '
                      f'{"앞" if d > 0 else "뒤"}로 {abs(d) * 100:.1f} cm')
-            if abs(d) < FIX_M:
+            if abs(d) < tol_m:
                 return
             self.mv.drive(abs(d), d < 0, self.mv.dk.pose()[2], vmax if k == 1 else V_NEAR)
+            if abs(d) < trust_m:
+                return
 
     def turn(self, deg, tag):
         e = self.mv.dk.rotate_to(md.wrap(self.mv.dk.pose()[2] + math.radians(deg)))
@@ -321,7 +339,23 @@ class Steps:
                 break
         return D, phi
 
-    def park(self, marker, stop_rec, target_rec, name='N15', phi=None):
+    def park(self, marker, stop_rec, target_rec, name='N15', phi=None, retries=PARK_RETRIES):
+        """후면 주차 + 실패하면 다시 하기. 주차 중 실패(마커를 놓침 등)하면 칸 안에 반쯤 걸친 채 끝나지 않게
+        주차를 시작한 자리(줄 위, 칸 밖)로 곧게 돌아가 처음부터 한 번 더 함. 그래도 안 되면 예전처럼 실패를 올림
+        (취소 md.Cancelled는 RuntimeError가 아니라서 여기서 안 잡힘 -> 바로 멈춤)"""
+        p0 = self.mv.dk.pose()
+        for attempt in range(retries + 1):
+            try:
+                return self._park_once(marker, stop_rec, target_rec, name, phi)
+            except RuntimeError as e:
+                if attempt >= retries:
+                    raise
+                self.mv.stop(0.1)
+                self.log(f'[주차 실패 {attempt + 1}] {e} -> 시작 자리로 돌아가 다시')
+                self.go_to(p0[0], p0[1])
+                self.mv.dk.rotate_to(p0[2])
+
+    def _park_once(self, marker, stop_rec, target_rec, name='N15', phi=None):
         """후면 주차 (실무 도킹 방식: 움직이면서 계속 보고, 정답 자세와 비교하며 줄을 따라감)
         - 정답 = D3 기록 자세. 벽 방향은 N15에서 멈춰서 잰 값(가장 정확)으로 고정
           (phi를 주면 그 값으로 고정: D1은 라이다 앞 벽 방향)
@@ -555,10 +589,12 @@ class Steps:
 
     def n14_align(self, front, axis, turn_deg=TURN_DEG):
         """N14 (Nav2로 도착, 동쪽 보기): 돌면서 마커 4 찾기 · 정렬 -> 기록 거리까지 앞뒤 -> 다시 정렬
-        -> 우로 90° -> 마커 5와 벽면 수직.  front = align_n14e, axis = align_n14s 기록 (dict)"""
-        self.face(front, 'N14 마커 찾기 · 정렬', find=True)
-        self.reach(front, 'N14 거리')
-        self.face(front, 'N14 정렬')
+        -> 우로 90° -> 마커 5와 벽면 수직.  front = align_n14e, axis = align_n14s 기록 (dict)
+        v2 (반복 줄임): 마커 4는 통로 안 좌우 위치만 정하면 됨 (방향은 우90 뒤 마커 5가, 좌우는 통로 라이다 ·
+        도크 줄 마커가 다시 고침) -> 마커 4 방향은 1° 안 / 한 번 돌면 끝, 거리는 1 cm 안 / 3 cm 안 이동은 odom을 믿음,
+        거리 뒤 '다시 정렬'은 뺌. 마커 5(축)는 그대로: N14에서는 라이다가 벽을 못 봐서 통로 출발 방향은 이것뿐"""
+        self.face(front, 'N14 마커 찾기 · 정렬', find=True, tol_deg=1.0, verify_deg=3.0)
+        self.reach(front, 'N14 거리', tol_m=0.01, trust_m=0.03)
         self.turn(turn_deg, 'N14')
         self.face(axis, 'N14 축 정렬')
 
@@ -592,8 +628,11 @@ class Steps:
         p0 = self.mv.dk.pose()
         S = np.array(p0[:2])
         h_c = h0 = p0[2]
-        ms, t_end = [], time.time() + 1.5
+        t_s = time.time()
+        ms, t_end = [], t_s + 1.5
         while time.time() < t_end and len(ms) < 6:
+            if not ms and time.time() - t_s > PRE_WAIT_S:
+                break                                   # 벽이 안 보이는 자리 (N14): 더 기다려도 안 보임
             q = self.mv.dk.pose()
             pts = self.lidar.take() if self.lidar else None
             if pts is not None:
@@ -602,8 +641,12 @@ class Steps:
                 if angs and not (len(angs) == 2 and abs(angs[0] - angs[1]) > math.radians(2.0)):
                     ms.append(md.wrap(q[2] + float(np.mean(angs))))
             time.sleep(0.03)
-        if len(ms) >= 3:
-            h_c = h0 = math.atan2(np.mean(np.sin(ms)), np.mean(np.cos(ms)))
+        h_pre = math.atan2(np.mean(np.sin(ms)), np.mean(np.cos(ms))) if len(ms) >= 3 else None
+        if h_pre is not None and abs(math.degrees(md.wrap(h_pre - p0[2]))) > PRE_MAX_DEG:
+            self.log(f'[{start}] 출발 전 벽 방향 {math.degrees(md.wrap(h_pre - p0[2])):+.1f}°는 너무 커서 무시 '
+                     f'(벽을 잘못 봄) -> 지금 방향으로 출발, 달리면서 고침')
+        elif h_pre is not None:
+            h_c = h0 = h_pre
             self.mv.dk.rotate_to(h_c)
             self.log(f'[{start}] 출발 전 벽 기준으로 {math.degrees(md.wrap(h_c - p0[2])):+.1f}° 고침')
         else:
@@ -693,9 +736,7 @@ class Steps:
                 break
             nxt = seq[i]
             left = ref_U + BAR_GAP.get(nxt, 0.30) - U
-            vmax = V_BAR_SLOW if (nxt == stop and (left < SLOW_M or nxt == 'P1')) else FOLLOW_V
-            if nxt == stop and BAR_KIND.get(nxt, 'dist') == 'dist':
-                vmax = min(vmax, 0.02 + 1.5 * max(0.0, left))
+            vmax = bar_vmax(nxt, stop, left)
             mot = max(-math.radians(LANE_STEER_DEG), min(math.radians(LANE_STEER_DEG), -math.atan(LANE_K * V)))
             w = max(-LANE_W_MAX, min(LANE_W_MAX, 2.5 * md.wrap(md.wrap(h_c + mot) - p[2])))
             v = min(vmax, v_prev + 0.25 / 15)

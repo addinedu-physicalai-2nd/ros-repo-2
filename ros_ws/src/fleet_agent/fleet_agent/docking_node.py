@@ -47,6 +47,11 @@ from geometry_msgs.msg import Twist
 from std_msgs.msg import String, UInt16MultiArray
 from tf2_ros import Buffer, TransformListener
 
+import csv
+import datetime
+import os
+import socket
+
 from .docking import marker_dock as md
 from .docking.corridor import BAR_BLACK, FOLLOW_STOP_EARLY, Lidar, Steps, _load, bar_update
 from .docking.line_dock import DEFAULTS, LineDocker, Motion
@@ -187,6 +192,8 @@ class DockingNode(Node):
     # ------------------------------------------------------------ 실행 (스레드)
     def run(self, req):
         method = req.get('method')
+        t_run = time.monotonic()
+        md.LOG_DIR = None          # summary.csv에 이 일의 로그폴더만 (로그를 안 여는 일이면 빈칸)
         try:
             if method == 'dock':
                 result = self.run_dock(req)
@@ -227,6 +234,7 @@ class DockingNode(Node):
             info = dict(self.info)
             self.job = None
             nxt, self.pending = self.pending, None
+        self.summary(req, result, timed_out, info, time.monotonic() - t_run)
         if result is None and not timed_out:
             pass  # 취소: 결과 안 보냄
         elif timed_out:
@@ -382,6 +390,43 @@ class DockingNode(Node):
         return result
 
     # ------------------------------------------------------------
+    SUMMARY_FIELDS = ['시각', '로봇', '노드', 'method', 'from_node', 'then', '결과', '소요초', '상세', '로그폴더']
+
+    def summary(self, req, result, timed_out, info, secs):
+        """정밀 동작 한 번마다 ~/dock_logs/summary.csv에 한 줄 (어디서 몇 초 · 실패 이유를 한눈에 비교).
+        단계별 시간은 그 로그폴더의 run.log (줄마다 시작부터 초). 기록 실패해도 동작에는 영향 없음"""
+        try:
+            if timed_out:
+                outcome = 'timeout'
+            elif result is None:
+                outcome = 'cancelled'
+            elif result == '성공':
+                outcome = 'ok'
+            else:
+                outcome = 'fail'
+            row = {
+                '시각': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                '로봇': socket.gethostname(),
+                '노드': req.get('node', ''),
+                'method': req.get('method', ''),
+                'from_node': req.get('from_node', ''),
+                'then': (req.get('then') or {}).get('method', '') if isinstance(req.get('then'), dict) else '',
+                '결과': outcome + (' (exited)' if info.get('exited') else ''),
+                '소요초': f'{secs:.1f}',
+                '상세': '' if result in (None, '성공') else str(result),
+                '로그폴더': os.path.basename(md.LOG_DIR or ''),
+            }
+            path = os.path.expanduser('~/dock_logs/summary.csv')
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            new = not os.path.exists(path)
+            with open(path, 'a', newline='', encoding='utf-8') as f:
+                w = csv.DictWriter(f, fieldnames=self.SUMMARY_FIELDS)
+                if new:
+                    w.writeheader()
+                w.writerow(row)
+        except Exception as e:  # noqa: BLE001
+            self.get_logger().warn(f'summary.csv 기록 실패: {e}')
+
     def publish(self, req, ok, detail, info=None):
         out = {'id': req.get('id'), 'node': req.get('node'), 'ok': ok, 'detail': detail}
         out.update(info or {})
