@@ -11,6 +11,9 @@
       /obstacle/person  std_msgs/Bool: 막혔을 때 obstacle_hz로 YOLO -> 앞에 손님(class_name)이 보이나 (obstacle_check)
       /obstacle/camera  std_msgs/Bool: 앞으로 가는 동안 cam_block_hz로 YOLO -> 바로 앞에 손님이 있나 (cam_block)
                         작은 레고 사람은 LiDAR에 안 잡혀 밀고 가서, 카메라로 직접 막음 (core.near_person)
+      /fleet/obstacle_snap  sensor_msgs/CompressedImage: 카메라로 멈춰 세울 때 그 화면 (박스 · 라벨 그려진 JPEG,
+                        header.frame_id = "클래스 conf"). 멈춘 동안 obstacle_snap_every초마다 새로. 브리지로 서버에 감
+                        -> 서버가 막힘(BLOCKED) 보고 때 관제 화면 팝업 (obstacle_snap)
 
 - YOLO는 요청을 처리하는 동안에만, infer_hz로 가장 최근 프레임 하나씩 돌린다 (CPU 아끼기, 주행 노드와 다른 프로세스)
 - confirm 번 연속으로 보이면 "찾음". wait_sec 안에 못 찾으면 ok=false (fleet_agent가 서버에 guest_lost)
@@ -55,6 +58,9 @@ class GuideNode(Node):
         self.cam_clear_n = int(p('cam_clear_n', 2).value)            # 연속 이만큼 안 보여야 멈춤을 풂 (YOLO가 한 장 놓쳐도 출발 안 하게)
         self.clear_count = 0
         self.cam_block_x = float(p('cam_block_x', 0.30).value)       # 박스 가운데가 화면 가운데에서 이 안 = 가는 길 위
+        self.obstacle_snap = p('obstacle_snap', True).value          # 카메라로 멈출 때 화면을 서버로 (관제 팝업)
+        self.obstacle_snap_every = float(p('obstacle_snap_every', 5.0).value)
+        self.snap_t = 0.0
         self.direction = 'STOP'
         self.near = None
         self.last_blocked_check = 0.0
@@ -77,6 +83,8 @@ class GuideNode(Node):
         self.create_subscription(img_type, self.camera_topic, self.on_image, qos_profile_sensor_data)   # camera_node = best effort
         self.person_pub = self.create_publisher(Bool, '/obstacle/person', 10)
         self.camera_pub = self.create_publisher(Bool, '/obstacle/camera', 10)
+        self.snap_pub = self.create_publisher(CompressedImage, '/fleet/obstacle_snap',
+                                              QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE))
         if (self.obstacle_check or self.cam_block) and self.model is not None:
             self.create_subscription(String, '/obstacle/status', self.on_obstacle, 10)
             latched = QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
@@ -152,12 +160,18 @@ class GuideNode(Node):
             msg, ft = self.frame, self.frame_t
         if msg is None or now - ft > 1.0:
             return                       # 최근 프레임 없음 (camera_block은 obstacle 노드에서 저절로 풀림)
-        boxes = self.persons(msg)
-        if boxes is None:
+        full = self.persons_full(msg)
+        if full is None:
             return
+        img, dets = full
+        boxes = [b for b, _ in dets]
         if fwd:
             box = near_box(boxes, self.cam_block_h, self.cam_block_x, self.cam_block_bottom)
+            was_near = self.near
             self.set_near(box is not None, box)
+            if box is not None and self.obstacle_snap and (not was_near or now - self.snap_t >= self.obstacle_snap_every):
+                self.snap_t = now
+                self.publish_snap(img, dets, box)
         if self.blocked and (lidar or fwd):
             self.last_blocked_check = now
             seen = bool(boxes)
@@ -168,19 +182,58 @@ class GuideNode(Node):
 
     def persons(self, msg):
         """프레임 하나에서 class_name 박스들 [(x1, y1, x2, y2) 0~1] (실패하면 None)"""
+        full = self.persons_full(msg)
+        return None if full is None else [b for b, _ in full[1]]
+
+    def persons_full(self, msg):
+        """(BGR 이미지, [((x1, y1, x2, y2) 0~1, conf)]) - 박스 그린 사진을 보낼 때 이미지 · conf도 씀 (실패하면 None)"""
         try:
             img = self.to_bgr(msg)
             with self.model_lock:
                 r = self.model(img, verbose=False, conf=self.conf)[0]
             if r.boxes is None:
-                return []
+                return img, []
             h, w = img.shape[:2]
-            return [(x1 / w, y1 / h, x2 / w, y2 / h)
-                    for (x1, y1, x2, y2), c in zip(r.boxes.xyxy.tolist(), r.boxes.cls.tolist())
-                    if int(c) == self.class_id]
+            return img, [((x1 / w, y1 / h, x2 / w, y2 / h), float(cf))
+                         for (x1, y1, x2, y2), c, cf in zip(r.boxes.xyxy.tolist(), r.boxes.cls.tolist(),
+                                                            r.boxes.conf.tolist())
+                         if int(c) == self.class_id]
         except Exception as e:  # noqa: BLE001
             self.get_logger().warn(f'YOLO 실패: {e}')
             return None
+
+    def publish_snap(self, img, dets, near):
+        """멈춰 세운 화면에 박스 · 라벨을 그려 JPEG으로 /fleet/obstacle_snap (가로 480으로 줄임, 한 장 수십 KB)"""
+        try:
+            import cv2
+            out = img.copy()
+            h, w = out.shape[:2]
+            best = 0.0
+            for b, cf in dets:
+                x1, y1, x2, y2 = int(b[0] * w), int(b[1] * h), int(b[2] * w), int(b[3] * h)
+                hit = b == near                       # 멈춘 이유가 된 박스는 빨강, 나머지는 초록
+                color = (60, 60, 230) if hit else (80, 200, 80)
+                cv2.rectangle(out, (x1, y1), (x2, y2), color, 3 if hit else 2)
+                text = f'{self.class_name} {cf:.2f}'
+                (tw, th), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
+                ty = max(th + 6, y1)
+                cv2.rectangle(out, (x1, ty - th - 6), (x1 + tw + 6, ty), color, -1)
+                cv2.putText(out, text, (x1 + 3, ty - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+                if hit:
+                    best = cf
+            if w > 480:
+                out = cv2.resize(out, (480, int(h * 480 / w)))
+            ok, buf = cv2.imencode('.jpg', out, [cv2.IMWRITE_JPEG_QUALITY, 70])
+            if not ok:
+                return
+            m = CompressedImage()
+            m.header.stamp = self.get_clock().now().to_msg()
+            m.header.frame_id = f'{self.class_name} {best:.2f}'
+            m.format = 'jpeg'
+            m.data = buf.tobytes()
+            self.snap_pub.publish(m)
+        except Exception as e:  # noqa: BLE001
+            self.get_logger().warn(f'장애물 사진 못 보냄: {e}')
 
     def detect(self, msg):
         """프레임 하나에 class_name이 보이나 (실패하면 None)"""

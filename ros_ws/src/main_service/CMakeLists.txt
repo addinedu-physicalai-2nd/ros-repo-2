@@ -44,10 +44,11 @@ target_link_libraries(main_service_sim PRIVATE pinkytorang_core)
 if(ament_cmake_FOUND)
   find_package(rclcpp REQUIRED)
   find_package(fleet_msgs REQUIRED)
+  find_package(sensor_msgs REQUIRED)
 
   add_executable(main_service src/main.cpp src/fleet_link_manager.cpp)
   target_link_libraries(main_service pinkytorang_core)
-  ament_target_dependencies(main_service rclcpp fleet_msgs)
+  ament_target_dependencies(main_service rclcpp fleet_msgs sensor_msgs)
 
   install(TARGETS main_service main_service_sim DESTINATION lib/${PROJECT_NAME})
   install(DIRECTORY config DESTINATION share/${PROJECT_NAME})

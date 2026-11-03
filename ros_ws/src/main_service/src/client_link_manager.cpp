@@ -280,6 +280,16 @@ void ClientLinkManager::setupRoutes() {
     return jsonResponse(200, j);
   });
 
+  // ---- GET /api/robots/pinky1/obstacle.jpg : 막혔을 때 그 로봇 카메라 사진 (YOLO 박스 그려짐)
+  CROW_ROUTE(app_, "/api/robots/<string>/obstacle.jpg")([this](const std::string& robot_id) {
+    std::string jpeg;
+    if (!tasks_.obstacleSnap(robot_id, jpeg)) return errorResponse(404, "no_snapshot");
+    crow::response r(200, jpeg);
+    r.set_header("Content-Type", "image/jpeg");
+    r.set_header("Cache-Control", "no-store");
+    return r;
+  });
+
   // ---- POST /api/robots/pinky1/control {"command":"PAUSE"}  (pinky1 대신 all 가능)
   CROW_ROUTE(app_, "/api/robots/<string>/control")
       .methods("POST"_method)([this](const crow::request& req, const std::string& robot_id) {
@@ -519,6 +529,20 @@ void ClientLinkManager::pushConfirmClosed(const ConfirmView& c, const std::strin
   open_confirms_.erase(c.task_id);
   sendToStore(text);
   if (isGuestConfirm(c.confirm)) sendToTable(c.table, text);
+}
+
+void ClientLinkManager::pushObstacleSnap(const std::string& robot_id, const std::string& node, const std::string& kind,
+                                         const std::string& label, long long stamp_ms) {
+  wvalue j;
+  j["type"] = "obstacle_snap";
+  j["robot_id"] = robot_id;
+  j["node"] = node;
+  j["kind"] = kind;
+  j["label"] = label;
+  j["ts"] = static_cast<double>(stamp_ms);   // 사진 주소 뒤에 붙여 캐시 안 쓰게
+  std::string text = j.dump();
+  std::lock_guard<std::recursive_mutex> lock(mutex_);
+  sendToStore(text);
 }
 
 void ClientLinkManager::pushAlert(const std::string& level, const std::string& robot_id, const std::string& message) {

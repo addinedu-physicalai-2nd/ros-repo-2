@@ -15,6 +15,7 @@
 #include <fleet_msgs/msg/move.hpp>
 #include <fleet_msgs/msg/robot_event.hpp>
 #include <fleet_msgs/msg/robot_state.hpp>
+#include <sensor_msgs/msg/compressed_image.hpp>
 
 #include "pinkytorang/config.hpp"
 #include "pinkytorang/ports.hpp"
@@ -40,6 +41,7 @@ class FleetLinkManager : public IFleetOut {
     rclcpp::Publisher<fleet_msgs::msg::Display>::SharedPtr display_pub;
     rclcpp::Subscription<fleet_msgs::msg::RobotState>::SharedPtr state_sub;
     rclcpp::Subscription<fleet_msgs::msg::RobotEvent>::SharedPtr event_sub;
+    rclcpp::Subscription<sensor_msgs::msg::CompressedImage>::SharedPtr snap_sub;   // 카메라 장애물 사진
   };
 
   struct LinkStatus {

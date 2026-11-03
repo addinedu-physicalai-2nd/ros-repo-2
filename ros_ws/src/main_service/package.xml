@@ -11,6 +11,7 @@
 
   <depend>rclcpp</depend>
   <depend>fleet_msgs</depend>
+  <depend>sensor_msgs</depend>
   <depend>yaml-cpp</depend>
   <depend>sqlite3</depend>
   <build_depend>asio</build_depend>

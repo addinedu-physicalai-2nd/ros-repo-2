@@ -24,9 +24,15 @@ FleetLinkManager::FleetLinkManager(rclcpp::Node::SharedPtr node, const Config& c
     l.event_sub = node_->create_subscription<fleet_msgs::msg::RobotEvent>(
         prefix + "event", reliable,
         [this, id](const fleet_msgs::msg::RobotEvent::SharedPtr msg) { onEvent(id, *msg); });
+    // 카메라(YOLO)가 앞 장애물을 멈춰 세울 때 로봇 guide_node가 보내는 사진 (박스 그려진 JPEG, frame_id = "클래스 conf")
+    l.snap_sub = node_->create_subscription<sensor_msgs::msg::CompressedImage>(
+        prefix + "obstacle_snap", rclcpp::QoS(1).reliable(),
+        [this, id](const sensor_msgs::msg::CompressedImage::SharedPtr msg) {
+          if (tasks_) tasks_->onObstacleSnap(id, std::string(msg->data.begin(), msg->data.end()), msg->header.frame_id);
+        });
     links_[id] = l;
     status_[id] = LinkStatus();
-    logLine("FLEET", "토픽 준비: " + prefix + "{move,control,display,state,event}");
+    logLine("FLEET", "토픽 준비: " + prefix + "{move,control,display,state,event,obstacle_snap}");
   }
 
   timer_ = node_->create_wall_timer(std::chrono::milliseconds(200), [this]() { checkLinks(); });

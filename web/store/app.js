@@ -19,7 +19,7 @@ const ENDED = ['DONE', 'FAILED', 'CANCELED'];
 const KITCHEN_CONFIRM = { LOADED: { kind: '픽업 창구 · 음식 적재', btn: '적재 완료' } };
 const GUEST_CONFIRM = { RECEIVED: '손님 수령 대기', SEATED: '손님 착석 대기' };
 
-const state = { robots: [], tasks: [], locks: [], tables: [], obstacles: [], confirms: {}, alerts: [] };
+const state = { robots: [], tasks: [], locks: [], tables: [], obstacles: [], confirms: {}, alerts: [], snaps: {} };
 const $ = (id) => document.getElementById(id);
 const robotColor = (id) => ROBOT_COLORS[id] || '#a1a1a6';
 
@@ -58,6 +58,7 @@ document.addEventListener('click', (e) => {
     if (confirm(`작업 #${b.dataset.task}을(를) 취소할까요?`)) post(b, `/api/tasks/${b.dataset.task}/cancel`, '취소했어요', '취소할 수 없는 단계예요');
   } else if (act === 'clear') post(b, `/api/tables/${encodeURIComponent(b.dataset.table)}/clear`, `${b.dataset.table} 빈자리`);
   else if (act === 'occupy') post(b, `/api/tables/${encodeURIComponent(b.dataset.table)}/occupy`, `${b.dataset.table} 사용 중`);
+  else if (act === 'snap-close') { delete state.snaps[b.dataset.robot]; renderSnaps(); }
   else if (act === 'robot') {
     if (b.dataset.cmd === 'CANCEL' && !confirm(`${b.dataset.robot}의 작업을 취소할까요?`)) return;
     control(b.dataset.robot, b.dataset.cmd, b);
@@ -96,6 +97,11 @@ function onMessage(msg) {
       renderTables();
       renderConfirms();
       renderCtl();
+      expireSnaps();
+      break;
+    case 'obstacle_snap':        // 로봇이 막힘을 보고했고 그 로봇 카메라가 앞을 찍어 둠 -> 작은 팝업
+      state.snaps[msg.robot_id] = { ...msg, at: Date.now() };
+      renderSnaps();
       break;
     case 'confirm_needed':
       state.confirms[msg.task_id] = { ...msg, left: msg.countdown_sec || 0 };
@@ -111,6 +117,42 @@ function onMessage(msg) {
       pushAlert(msg);
       break;
   }
+}
+
+// ---------- 장애물 사진 팝업 ----------
+// 서버가 막힘(BLOCKED) 보고 때 보내 줌 (카메라 YOLO가 찍은 사진이 있을 때만). 로봇마다 하나 (새로 오면 바꿈)
+// 닫힘: ✕ / 그 로봇이 막힘이 아니게 되고 5초 / 2분 지남
+const SNAP_KEEP_MS = 120000, SNAP_AFTER_CLEAR_MS = 5000;
+function renderSnaps() {
+  const list = Object.values(state.snaps).sort((a, b) => a.robot_id.localeCompare(b.robot_id));
+  $('snaps').innerHTML = list.map((s) => {
+    const t = new Date(s.at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const kind = (typeof OBST_TEXT !== 'undefined' && OBST_TEXT[s.kind]) || '장애물';
+    return `
+      <div class="snap" style="--rc:${robotColor(s.robot_id)}">
+        <div class="snap-head">
+          <span class="snap-robot"><span class="dot" style="background:${robotColor(s.robot_id)}"></span>${esc(s.robot_id)}</span>
+          <span class="badge BLOCKED">막힘</span>
+          <span class="snap-node">${esc(s.node || '')} 앞 · ${esc(kind)}</span>
+          <button class="icon-btn" data-act="snap-close" data-robot="${esc(s.robot_id)}" aria-label="닫기">✕</button>
+        </div>
+        <img class="snap-img" alt="${esc(s.robot_id)} 카메라" src="/api/robots/${encodeURIComponent(s.robot_id)}/obstacle.jpg?t=${esc(s.ts)}">
+        <div class="snap-foot"><span>${esc(s.label || '')}</span><span class="num">${t}</span></div>
+      </div>`;
+  }).join('');
+}
+function expireSnaps() {
+  const now = Date.now();
+  let changed = false;
+  Object.values(state.snaps).forEach((s) => {
+    const r = state.robots.find((x) => x.id === s.robot_id);
+    if (r && r.state !== 'BLOCKED') s.clearAt = s.clearAt || now; else s.clearAt = 0;
+    if (now - s.at > SNAP_KEEP_MS || (s.clearAt && now - s.clearAt > SNAP_AFTER_CLEAR_MS)) {
+      delete state.snaps[s.robot_id];
+      changed = true;
+    }
+  });
+  if (changed) renderSnaps();
 }
 
 // ---------- 확인 필요 ----------

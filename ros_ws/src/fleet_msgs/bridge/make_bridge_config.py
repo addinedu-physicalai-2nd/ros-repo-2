@@ -6,7 +6,7 @@
   python3 make_bridge_config.py pinky3 3 --server-domain 30
 
 결과: 같은 폴더에 <robot_id>_bridge.yaml 생성
-로봇 쪽 토픽:  /fleet/state, /fleet/event, /fleet/move, /fleet/control, /fleet/display  (namespace 없음)
+로봇 쪽 토픽:  /fleet/state, /fleet/event, /fleet/obstacle_snap, /fleet/move, /fleet/control, /fleet/display  (namespace 없음)
 서버 쪽 토픽:  /<robot_id>/fleet/...                                     (브리지가 이름 변환)
 """
 import argparse
@@ -14,7 +14,7 @@ import os
 
 TEMPLATE = """\
 # 자동 생성: python3 make_bridge_config.py {rid} {rd} --server-domain {sd}
-# 서버 도메인({sd}) <-> {rid} 도메인({rd}) 사이에서 fleet 토픽 5개만 전달한다.
+# 서버 도메인({sd}) <-> {rid} 도메인({rd}) 사이에서 fleet 토픽 6개만 전달한다.
 # 로봇 쪽은 namespace 없이 /fleet/..., 서버 쪽은 /{rid}/fleet/... 로 이름을 바꿔 전달한다.
 # Nav2, tf, 라이다 등 나머지 토픽은 {rid} 도메인 안에만 남는다.
 #
@@ -44,6 +44,15 @@ topics:
       durability: volatile
       history: keep_last
       depth: 10
+
+  /fleet/obstacle_snap:            # 카메라(YOLO)로 멈출 때 화면 (guide_node, 몇 초에 한 장) -> 관제 팝업
+    type: sensor_msgs/msg/CompressedImage
+    remap: /{rid}/fleet/obstacle_snap
+    qos:
+      reliability: reliable
+      durability: volatile
+      history: keep_last
+      depth: 1
 
   # ---- 서버 -> 로봇 (토픽별로 도메인 방향을 뒤집음) ----
   /{rid}/fleet/move:

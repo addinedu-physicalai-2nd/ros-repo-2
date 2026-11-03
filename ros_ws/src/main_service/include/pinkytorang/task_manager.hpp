@@ -64,6 +64,9 @@ class TaskManager {
                     const std::string& reason);
   void onCommLost(const std::string& id);
   void onCommRestored(const std::string& id);
+  // 로봇 카메라(YOLO)가 앞 장애물을 찍은 사진 (JPEG, 박스 그려짐). 막힘 보고가 오면 이걸로 팝업
+  void onObstacleSnap(const std::string& id, std::string jpeg, const std::string& label);
+  bool obstacleSnap(const std::string& id, std::string& jpeg);   // HTTP: 마지막 사진 (없으면 false)
 
   // ---- 주기 처리 (main에서 0.1초마다): 확인 시간 초과, snapshot 보내기
   void tick();
@@ -179,6 +182,12 @@ class TaskManager {
   void record(const std::string& type, const std::string& msg);
 
   std::mutex mutex_;
+  struct ObstacleSnap {
+    std::string jpeg;
+    std::string label;      // 예: "toy_person 0.87"
+    Clock::time_point at;
+  };
+  std::map<std::string, ObstacleSnap> snaps_;   // 로봇별 마지막 카메라 장애물 사진
   const Config& cfg_;
   const MapManager& map_;
   TrafficManager& traffic_;

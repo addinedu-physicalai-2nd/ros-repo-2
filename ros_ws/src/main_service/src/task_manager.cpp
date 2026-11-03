@@ -352,6 +352,15 @@ void TaskManager::onRobotEvent(const std::string& id, uint8_t type, uint32_t cmd
     } else {
       alert("WARN", id, "진행이 막혔어요 (" + node + ", " + info + "). 비키면 이어서 가요");
     }
+    // 카메라(YOLO)가 앞을 찍어 뒀으면 관제 화면에 팝업 (라이다만 본 장애물은 사진이 없거나 오래됨 -> 안 띄움)
+    auto sit = snaps_.find(id);
+    if (client_ && sit != snaps_.end() &&
+        std::chrono::duration<double>(Clock::now() - sit->second.at).count() <= cfg_.obstacle_snap_max_age_sec) {
+      long long ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                         std::chrono::system_clock::now().time_since_epoch()).count();
+      client_->pushObstacleSnap(id, node, kind, sit->second.label, ms);
+      record("ALERT", id + " 장애물 사진 팝업 (" + node + ", " + sit->second.label + ")");
+    }
   } else if (type == EVENT_DOCKED) {
     // 로봇이 도크(D1 · D2 · D3)에 정밀 도킹을 끝냄 (CMD_DONE 바로 앞). 실패면 Nav2 위치로 섬
     if (reason.empty()) alert("INFO", id, node + " 도킹 완료");
@@ -385,6 +394,23 @@ void TaskManager::onCommLost(const std::string& id) {
   updateHold(*r);
   alert("ERROR", id, "통신이 끊겼어요");
   dirty_ = true;
+}
+
+void TaskManager::onObstacleSnap(const std::string& id, std::string jpeg, const std::string& label) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (!findRobot(id) || jpeg.empty()) return;
+  ObstacleSnap& s = snaps_[id];
+  s.jpeg = std::move(jpeg);
+  s.label = label;
+  s.at = Clock::now();
+}
+
+bool TaskManager::obstacleSnap(const std::string& id, std::string& jpeg) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  auto it = snaps_.find(id);
+  if (it == snaps_.end()) return false;
+  jpeg = it->second.jpeg;
+  return true;
 }
 
 void TaskManager::onCommRestored(const std::string& id) {

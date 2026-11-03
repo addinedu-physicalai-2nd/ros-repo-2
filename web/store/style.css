@@ -230,3 +230,17 @@ td:first-child { white-space: nowrap; color: var(--muted); }
 @keyframes tbl-flow { to { stroke-dashoffset: -14; } }
 .g-table-badge circle { stroke: #fff; stroke-width: 2.5; }
 .g-table-badge text { font-size: 11px; font-weight: 800; fill: #fff; text-anchor: middle; dominant-baseline: central; }
+
+/* 장애물 사진 팝업 (관제 맵 오른쪽 아래 = 오른쪽 칸 바로 왼쪽, 범례 위. 로봇마다 하나) */
+.snaps { position: fixed; right: calc(24px + 360px + 20px + 18px); bottom: 70px; display: flex; flex-direction: column-reverse; gap: 10px; z-index: 40; }
+@media (max-width: 1600px) { .snaps { right: calc(18px + 320px + 16px + 16px); } }
+.snap {
+  width: 300px; background: var(--surface); border-radius: var(--radius); box-shadow: 0 8px 28px rgba(0, 0, 0, .18);
+  border-left: 4px solid var(--rc); overflow: hidden; animation: drop .2s ease;
+}
+.snap-head { display: flex; align-items: center; gap: 6px; padding: 8px 8px 8px 12px; font-size: 13px; }
+.snap-robot { display: inline-flex; align-items: center; gap: 6px; font-weight: 800; }
+.snap-node { color: var(--muted); font-size: 12px; margin-left: 2px; }
+.snap-head .icon-btn { margin-left: auto; width: 26px; height: 26px; }
+.snap-img { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: cover; background: #1c1c1e; }
+.snap-foot { display: flex; justify-content: space-between; padding: 6px 12px 8px; font-size: 12px; color: var(--muted); }

@@ -80,6 +80,7 @@ struct Config {
   int localize_timeout_sec = 90;   // LOCALIZE 하나가 끝나기를 기다리는 최대 시간 (넘으면 알림 뒤 다음 로봇)
   bool stay_at_start = false;      // 시험용: 도킹 대신 켤 때 노드를 집으로 (쉬면 거기서 대기, 작업 끝나면 거기로 돌아감)
   double comm_timeout_sec = 3.0; // state가 이만큼 안 오면 통신 끊김
+  double obstacle_snap_max_age_sec = 45.0;  // 막힘 보고 때 카메라 장애물 사진이 이보다 오래됐으면 팝업 안 띄움 (라이다만 본 장애물)
   int lock_lookahead = 2;        // 로봇 앞으로 미리 잡아 두는 lock 노드 수
   double detour_max_m = 1.0;     // 앞 로봇이 움직이는 중이면, 우회가 이만큼(m) 이하로 길어질 때만 돌아간다
   double detour_wait_sec = 8.0;  // 이만큼 기다려도 안 풀리면 길이 상관없이 우회

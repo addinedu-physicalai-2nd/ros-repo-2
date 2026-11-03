@@ -32,6 +32,8 @@ class ClientLinkManager : public IClientOut {
   void pushConfirmNeeded(const ConfirmView& c) override;
   void pushConfirmClosed(const ConfirmView& c, const std::string& by) override;
   void pushAlert(const std::string& level, const std::string& robot_id, const std::string& message) override;
+  void pushObstacleSnap(const std::string& robot_id, const std::string& node, const std::string& kind,
+                        const std::string& label, long long stamp_ms) override;
 
  private:
   void setupRoutes();

@@ -59,6 +59,7 @@ bool loadConfig(const std::string& path, Config& cfg, std::string& error) {
     if (root["localize_timeout_sec"]) cfg.localize_timeout_sec = root["localize_timeout_sec"].as<int>();
     if (root["stay_at_start"]) cfg.stay_at_start = root["stay_at_start"].as<bool>();
     if (root["comm_timeout_sec"]) cfg.comm_timeout_sec = root["comm_timeout_sec"].as<double>();
+    if (root["obstacle_snap_max_age_sec"]) cfg.obstacle_snap_max_age_sec = root["obstacle_snap_max_age_sec"].as<double>();
     if (root["lock_lookahead"]) cfg.lock_lookahead = root["lock_lookahead"].as<int>();
     if (root["detour_max_m"]) cfg.detour_max_m = root["detour_max_m"].as<double>();
     if (root["detour_wait_sec"]) cfg.detour_wait_sec = root["detour_wait_sec"].as<double>();
