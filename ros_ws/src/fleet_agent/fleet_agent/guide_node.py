@@ -30,7 +30,7 @@ from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy, qos_profi
 from sensor_msgs.msg import CompressedImage, Image
 from std_msgs.msg import Bool, String
 
-from .core import near_box
+from .core import CamBlockGate, near_box
 from .guide_effects import leds_off, play
 
 
@@ -55,9 +55,17 @@ class GuideNode(Node):
         self.cam_block_hz = float(p('cam_block_hz', 4.0).value)
         self.cam_block_h = float(p('cam_block_h', 0.20).value)       # 손님 박스 높이가 화면의 이만큼 이상 = 가까움
         self.cam_block_bottom = float(p('cam_block_bottom', 0.85).value)   # 또는 박스 아래끝이 화면의 이만큼 아래 = 바로 앞 바닥
-        self.cam_clear_n = int(p('cam_clear_n', 2).value)            # 연속 이만큼 안 보여야 멈춤을 풂 (YOLO가 한 장 놓쳐도 출발 안 하게)
+        self.cam_clear_n = int(p('cam_clear_n', 8).value)            # 연속 이만큼 안 보여야 멈춤을 풂 (YOLO가 한 장 놓쳐도 출발 안 하게)
         self.clear_count = 0
         self.cam_block_x = float(p('cam_block_x', 0.30).value)       # 박스 가운데가 화면 가운데에서 이 안 = 가는 길 위
+        self.gate = CamBlockGate(
+            conf_on=float(p('cam_block_conf', 0.70).value),           # 멈출 때 conf (손님 찾기 conf보다 높게: 헛것에 안 멈춤)
+            on_n=int(p('cam_block_on_n', 2).value),                   # 연속 이만큼 보여야 멈춤
+            clear_n=self.cam_clear_n, min_h=self.cam_block_h, x_band=self.cam_block_x, bottom=self.cam_block_bottom,
+            release_x=float(p('cam_release_x', 0.45).value),          # 멈춘 뒤에는 이만큼 옆까지 보이면 안 풂 (비켜 가다 옆으로 침)
+            release_bottom=float(p('cam_release_bottom', 0.50).value),  # 그리고 박스 아래끝이 화면 이만큼 아래 (가까움)
+            max_area=float(p('cam_block_max_area', 0.45).value),      # 화면의 이만큼 넘게 덮는 박스는 오검출로 봄
+            lost_hold=float(p('cam_lost_hold_sec', 2.0).value))       # 가까워서 안 보이게 된 건 이만큼 더 있다고 봄
         self.obstacle_snap = p('obstacle_snap', True).value          # 카메라로 멈출 때 화면을 서버로 (관제 팝업)
         self.obstacle_snap_every = float(p('obstacle_snap_every', 5.0).value)
         self.snap_t = 0.0
@@ -126,17 +134,11 @@ class GuideNode(Node):
         if msg.data != self.direction:
             self.direction = msg.data
             if self.direction != 'FORWARD' and self.near:
-                self.clear_count = self.cam_clear_n
+                self.gate.reset()
                 self.set_near(False)     # 앞으로 안 감: 카메라 막힘 풀기
 
     def set_near(self, near, box=None):
-        """주행 중 YOLO 결과 -> /obstacle/camera. 보이면 바로 멈춤, 풀 때는 cam_clear_n번 연속 안 보여야 (깜빡임에 출발 안 함)"""
-        if near:
-            self.clear_count = 0
-        elif self.near:
-            self.clear_count += 1
-            if self.clear_count < self.cam_clear_n:
-                near = True              # 아직 멈춤 유지
+        """주행 중 YOLO 판단(CamBlockGate) 결과 -> /obstacle/camera (멈춤 · 풂 판단은 gate가 함)"""
         self.camera_pub.publish(Bool(data=near))
         if near != self.near:
             self.near = near
@@ -166,9 +168,14 @@ class GuideNode(Node):
         img, dets = full
         boxes = [b for b, _ in dets]
         if fwd:
-            box = near_box(boxes, self.cam_block_h, self.cam_block_x, self.cam_block_bottom)
             was_near = self.near
-            self.set_near(box is not None, box)
+            near, box = self.gate.update(dets, now)
+            self.set_near(near, box)
+            if near and self.gate.why == 'lost_close' and not getattr(self, '_lost_logged', False):
+                self._lost_logged = True
+                self.get_logger().info('카메라: 너무 가까워 안 보임 -> 아직 앞에 있다고 봄')
+            elif self.gate.why != 'lost_close':
+                self._lost_logged = False
             if box is not None and self.obstacle_snap and (not was_near or now - self.snap_t >= self.obstacle_snap_every):
                 self.snap_t = now
                 self.publish_snap(img, dets, box)

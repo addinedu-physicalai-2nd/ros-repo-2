@@ -205,6 +205,62 @@ def near_box(boxes, min_h=0.20, x_band=0.30, bottom=0.85):
     return None
 
 
+class CamBlockGate:
+    """주행 중 카메라(YOLO) 멈춤 판단. 멈출 때는 깐깐하게, 풀 때는 더 깐깐하게 (깜빡임 · 가까워서 놓침 · 옆으로 비킴에 안 풀림)
+    update(dets, now) -> (near, box): dets = [((x1, y1, x2, y2) 0~1, conf)]
+    - 멈춤: conf >= conf_on, 화면을 덮는 큰 박스(area > max_area, 오검출)는 뺌 -> near_box가 on_n번 연속이면 멈춤
+    - 유지: 길 위 가까운 박스, 또는 conf(기본 conf) 이상 박스가 가운데 ±release_x · 아래끝 release_bottom 아래에 하나라도 있으면
+    - 가까워서 놓침: 마지막으로 본 박스가 화면 아래 끝(lost_bottom)에 닿았거나 컸으면(lost_h) lost_hold초 동안은 있다고 봄
+    - 풂: 위가 다 아니고 clear_n번 연속"""
+
+    def __init__(self, conf_on=0.70, on_n=2, clear_n=8, min_h=0.20, x_band=0.30, bottom=0.85, release_x=0.45,
+                 release_bottom=0.50, max_area=0.45, lost_hold=2.0, lost_bottom=0.95, lost_h=0.45):
+        self.conf_on, self.on_n, self.clear_n = conf_on, on_n, clear_n
+        self.min_h, self.x_band, self.bottom = min_h, x_band, bottom
+        self.release_x, self.release_bottom, self.max_area = release_x, release_bottom, max_area
+        self.lost_hold, self.lost_bottom, self.lost_h = lost_hold, lost_bottom, lost_h
+        self.near = False
+        self.on_count = 0
+        self.clear_count = 0
+        self.last_seen = None        # (now, box) 유지 판단에 쓴 마지막 박스
+        self.why = ''
+
+    @staticmethod
+    def _area(b):
+        return max(0.0, b[2] - b[0]) * max(0.0, b[3] - b[1])
+
+    def reset(self):
+        self.near, self.on_count, self.clear_count, self.last_seen, self.why = False, 0, 0, None, ''
+
+    def update(self, dets, now):
+        ok = [(b, c) for b, c in dets if self._area(b) <= self.max_area]          # 화면을 덮는 박스 = 오검출
+        strong = [b for b, c in ok if c >= self.conf_on]
+        box = near_box(strong, self.min_h, self.x_band, self.bottom)
+        if not self.near:
+            self.on_count = self.on_count + 1 if box is not None else 0
+            if self.on_count >= self.on_n:
+                self.near, self.clear_count, self.why = True, 0, 'seen'
+                self.last_seen = (now, box)
+            return self.near, box
+        keep = box
+        if keep is None:
+            keep = next((b for b, c in ok if abs((b[0] + b[2]) / 2 - 0.5) <= self.release_x
+                         and b[3] >= self.release_bottom), None)
+        if keep is not None:
+            self.clear_count, self.last_seen, self.why = 0, (now, keep), 'seen'
+            return True, keep
+        if self.last_seen is not None:
+            t, b = self.last_seen
+            if (b[3] >= self.lost_bottom or b[3] - b[1] >= self.lost_h) and now - t < self.lost_hold:
+                self.why = 'lost_close'
+                return True, None                                                   # 너무 가까워 안 보이는 것
+        self.clear_count += 1
+        if self.clear_count >= self.clear_n:
+            self.near, self.on_count, self.last_seen, self.why = False, 0, None, ''
+            return False, None
+        return True, None
+
+
 def near_person(boxes, min_h=0.20, x_band=0.30, bottom=0.85):
     """가는 길 위 가까이에 손님이 있나 (near_box가 있나)"""
     return near_box(boxes, min_h, x_band, bottom) is not None

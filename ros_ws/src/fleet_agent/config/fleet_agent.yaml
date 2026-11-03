@@ -77,8 +77,14 @@ guide:
     obstacle_hz: 1.0                  # 그때 YOLO 횟수 (초당)
     cam_block: true                   # 앞으로 가는 동안 YOLO로 바로 앞 손님을 보면 멈춤 -> /obstacle/camera
                                       # (레고 사람은 LiDAR 높이보다 낮아 안 잡힘 -> 밀고 가던 문제)
-    cam_block_hz: 4.0                 # 앞으로 갈 때 YOLO 횟수 (초당). LiDAR보다 먼저: 카메라가 보면 LiDAR가 비어 있어도 멈춤
+    cam_block_hz: 6.0                 # 앞으로 갈 때 YOLO 횟수 (초당). LiDAR보다 먼저: 카메라가 보면 LiDAR가 비어 있어도 멈춤
+    cam_block_conf: 0.70              # 멈출 때 conf (위 conf 0.5는 손님 찾기용). 헛것에 멈추면 올리기
+    cam_block_on_n: 2                 # 연속 이만큼 보여야 멈춤 (한 장 헛것에 안 멈춤)
+    cam_block_max_area: 0.45          # 화면의 이만큼 넘게 덮는 박스는 오검출로 봄 (벽 · 테이블 전체를 손님으로 잡는 것)
     cam_block_h: 0.20                 # 손님 박스 높이가 화면 높이의 이만큼 이상이면 '가까움' (멀리서 서면 키우고, 너무 붙어서 서면 줄이기)
     cam_block_bottom: 0.85            # 또는 박스 아래끝이 화면 높이의 이만큼 아래면 '바로 앞 바닥' (작은 레고 사람)
-    cam_clear_n: 2                    # 연속 이만큼 안 보여야 멈춤을 풂
+    cam_clear_n: 8                    # 연속 이만큼 안 보여야 멈춤을 풂 (6 Hz면 약 1.3초)
+    cam_release_x: 0.45               # 멈춘 뒤에는 화면 가운데 ±이만큼 안에 손님이 보이면 안 풂 (옆으로 비켜 가다 치는 것)
+    cam_release_bottom: 0.50          # 그리고 박스 아래끝이 화면 이만큼 아래 (가까이)
+    cam_lost_hold_sec: 2.0            # 너무 가까워 안 보이게 된 손님은 이만큼 더 있다고 봄
     cam_block_x: 0.30                 # 박스 가운데가 화면 가운데에서 화면 폭의 이만큼 안 = 가는 길 위 (옆 사람은 안 멈춤)

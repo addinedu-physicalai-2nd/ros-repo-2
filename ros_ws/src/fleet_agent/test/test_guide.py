@@ -277,3 +277,35 @@ def test_node_here_updates_only_that_node():
     old = [n for n in yaml.safe_load(text)['nodes'] if n['id'] == 'D1'][0]
     assert (d1['x'], d1['y'], d1['yaw']) == (1.8, 0.21, 1.571) and d1['next'] == old['next']
     assert '[추정]' not in line and '실측' in line
+
+
+# ---- 주행 중 카메라 멈춤 판단 (CamBlockGate)
+from fleet_agent.core import CamBlockGate
+
+NEAR = ((0.45, 0.55, 0.55, 0.92), 0.85)          # 길 위 가까운 레고 사람
+
+
+def test_gate_needs_two_strong_frames_and_ignores_low_conf_and_huge_box():
+    g = CamBlockGate()
+    assert g.update([((0.45, 0.55, 0.55, 0.92), 0.60)], 0.0) == (False, None)      # conf 낮음
+    assert g.update([((0.0, 0.0, 1.0, 1.0), 0.90)], 0.1)[0] is False                 # 화면 덮는 박스 = 오검출
+    assert g.update([NEAR], 0.2)[0] is False                                         # 한 장만으로는 안 멈춤
+    assert g.update([NEAR], 0.3)[0] is True
+
+
+def test_gate_keeps_while_beside_and_releases_after_clear_n():
+    g = CamBlockGate(clear_n=3)
+    g.update([NEAR], 0.0); g.update([NEAR], 0.1)
+    side = ((0.80, 0.50, 0.90, 0.80), 0.55)                                         # 옆으로 비킨 것처럼 (가운데 +35%)
+    assert g.update([side], 0.2)[0] is True                                          # 멈출 땐 안 걸리지만 풀지도 않음
+    assert g.update([], 0.3)[0] is True and g.update([], 0.4)[0] is True
+    assert g.update([], 0.5)[0] is False
+
+
+def test_gate_holds_when_lost_close():
+    g = CamBlockGate(clear_n=2, lost_hold=1.0)
+    close = ((0.40, 0.45, 0.60, 0.99), 0.90)                                        # 아래 끝에 닿음
+    g.update([close], 0.0); g.update([close], 0.1)
+    assert g.update([], 0.5)[0] is True and g.update([], 0.9)[0] is True              # 가까워 안 보임 -> 유지
+    assert g.update([], 1.2)[0] is True                                              # 시간 지나고 1번째 안 보임
+    assert g.update([], 1.3)[0] is False
