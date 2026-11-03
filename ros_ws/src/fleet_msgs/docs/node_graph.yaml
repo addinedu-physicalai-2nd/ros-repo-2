@@ -59,7 +59,7 @@ nodes:
   - {id: N13, type: PASS, lock: true, x: 0.589, y: 0.522, next: [N12, N10, N14]}   # N13 -> N14 일방통행 (N14 -> N13 없음)
 
   # ---- 주방 통로 (N14 -> P1 후진 일방통행, 지나가는 순서대로 번호) ----
-  - {id: N14, type: PASS, lock: true, x: 0.189, y: 0.522, next: [N15]}   # 통로 입구. 마커 2개로 위치·축 정렬 후 후진 시작 (align)
+  - {id: N14, type: PASS, lock: true, x: 0.150, y: 0.522, next: [N15]}   # 통로 입구. 마커 2개로 위치·축 정렬 후 후진 시작 (align)
   - {id: N15, type: PASS, lock: true, x: 0.197, y: 0.157, next: [N16, D3]}   # D3 출입 축. 바닥 가로선
   - {id: N16, type: PASS, lock: true, x: 0.150, y: 0.034, next: [P2, D2]}   # D2 출입 축. 바닥 가로선
   - {id: P2, type: STOP, stop_kind: QUEUE, lock: true, x: 0.268, y: -0.384, yaw: 1.625, next: [P1]}   # 픽업 대기 (후진 중이라 앞은 아래)

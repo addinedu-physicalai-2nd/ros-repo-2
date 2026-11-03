@@ -44,7 +44,7 @@
 # 도킹 알림: dock / dock_in / entrance가 끝나면 RobotEvent DOCKED, undock / entrance_exit가 끝나면 UNDOCKED (fleet_msgs v10)
 # 목록에 없는 노드는 Nav2 / odom 도착만으로 끝낸다.
 
-N14: {method: align, front: n14e, axis: n14s, turn_deg: -90, hold_axis: true}   # 마커 4 -> 우90 -> 마커 5
+N14: {method: align, front: n14e, axis: n14s, turn_deg: -88, hold_axis: true}   # 마커 4 -> 우90 -> 마커 5
 
 D1:  {method: entrance, from: N1, timeout: 120,         # 입구 통로 (안내 로봇 자리). N1에서 D1 쪽을 보고 통째로: docking/entrance.py
       leave: {method: entrance_exit, timeout: 60}}       # 빠지기: 교점(통로 가운데)까지 나와 북쪽 -> Nav2로 N1. 기록: dock_record d1
