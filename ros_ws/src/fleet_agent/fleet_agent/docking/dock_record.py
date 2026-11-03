@@ -10,6 +10,11 @@
   ros2 run fleet_agent dock_record d1 [--line-tz 0.21] # 입구 D1 칸에 손으로 반듯하게 (앞 = 마커 1, 바구니 = 칸막이):
                                                        #   D1 · 교점(마커 1 · 6) · N1 (docking/entrance.py). 끝: N1에서 남쪽
   ros2 run fleet_agent dock_record check --dock d1     # D1 기록 확인
+  ros2 run fleet_agent dock_record spin [--turns 2]   # 제자리 회전 시험: odom 회전 vs 실제(라이다) -> 바퀴 간격 보정 비율
+                                                       #   (벽이 보이는 자리, 로봇마다 한 번. 결과 ~/dock_logs/spin_check.csv)
+  ros2 run fleet_agent dock_record lidar --dock d2     # D2 칸에 손으로 반듯하게 (= 정답 자리) 넣고, 옆 칸은 비우고:
+                                                       #   도크 스캔 -> 곧게 앞으로 n16 줄 자리 -> 줄 스캔 = records/lidar_d2.json
+                                                       #   주차 때 줄 자리 스캔을 이것과 겹쳐 칸 위치를 잡음 (d3도 같게)
 
 all 순서 (손으로 놓는 건 D3 하나. 나머지는 로봇이 벽과 수직으로 맞추고 찍음)
   D3(손) -> 앞으로 곧게 나와 마커 3이 --n15-tz(기본 15 cm)인 곳 = N15: n15 저장
@@ -24,7 +29,7 @@ import os
 
 from . import marker_dock as md
 from . import entrance, records
-from .corridor import Lidar, Steps, _save, align_record, bearing, check, side_lines
+from .corridor import Lidar, Steps, _load, _save, align_record, bearing, check, side_lines
 from .line_dock import DEFAULTS, Motion
 from .undock import _set_size
 
@@ -37,7 +42,9 @@ RECORDS = {
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('cmd', choices=['all', 'dock', 'align', 'check', 'scan', 'd1'])
+    ap.add_argument('cmd', choices=['all', 'dock', 'align', 'check', 'scan', 'd1', 'lidar', 'spin'])
+    ap.add_argument('--turns', type=int, default=2, help='spin: 한 방향 몇 바퀴')
+    ap.add_argument('--w', type=float, default=0.6, help='spin: 회전 속도 rad/s')
     ap.add_argument('name', nargs='?', help='align: 기록 이름 (~/align_<이름>.json)')
     ap.add_argument('--dock', default='d3', choices=sorted(RECORDS) + ['d1'])
     ap.add_argument('--line-tz', type=float, default=entrance.LINE_TZ, help='d1: D1에서 곧게 앞으로 교점까지 대략 (마커 1 거리 m)')
@@ -127,6 +134,32 @@ def main():
                 _save(path, align_record(args.id, args.size, m))
                 result = (f'저장: 거리 {m["tz"] * 100:.1f} cm, 방위각 {math.degrees(bearing(m)):+.2f}°, '
                           f'기울기 {math.degrees(m["yaw"]):+.1f}° -> {path}')
+        elif args.cmd == 'spin':
+            from . import spin_check
+            r = spin_check.run(mv, lidar, md.log, turns=args.turns, w=args.w)
+            import csv
+            import datetime
+            import socket
+            path = os.path.expanduser('~/dock_logs/spin_check.csv')
+            new = not os.path.exists(path)
+            with open(path, 'a', newline='', encoding='utf-8') as f:
+                wr = csv.writer(f)
+                if new:
+                    wr.writerow(['시각', '로봇', '바퀴', '왼쪽_odom_deg', '왼쪽_실제_deg', '오른쪽_odom_deg', '오른쪽_실제_deg',
+                                 '실제/odom', '바퀴간격_곱할값'])
+                L, R = r['왼쪽(반시계)'], r['오른쪽(시계)']
+                wr.writerow([datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'), socket.gethostname(), args.turns,
+                             f'{L["odom_deg"]:.1f}', f'{L["real_deg"]:.1f}', f'{R["odom_deg"]:.1f}', f'{R["real_deg"]:.1f}',
+                             f'{r["ratio"]:.4f}', f'{1 / r["ratio"]:.4f}'])
+            result = r['msg']
+        elif args.cmd == 'lidar':
+            if args.dock not in RECORDS:
+                raise SystemExit('lidar 는 --dock d2 또는 --dock d3')
+            c = RECORDS[args.dock]
+            s_out = float(_load(f'~/dock_target_{c["target"]}.json')['gx'] - _load(f'~/dock_target_{c["stop"]}.json')['gx'])
+            md.log(f'[기록] {c["target"]} 칸 라이다: 도크 스캔 -> {s_out * 100:.1f} cm 앞 ({c["stop"]} 줄 자리) -> 줄 스캔')
+            st = Steps(mv, None, md.log, lidar)
+            result = st.record_pocket(c['target'], s_out)
         elif args.cmd == 'd1':
             cam = open_cam(1)
             result = entrance.Entrance(mv, cam, md.log, lidar, line_tz=args.line_tz).record()

@@ -46,7 +46,9 @@ DEFAULTS = {
     'entry_ahead': 0.08,     # 차선 올라타기 앞 거리 (m)
     'line_max': 0.40,        # 정렬 끝에서 선을 찾을 최대 거리 (m)
     'line_offset': 0.0,      # 선 감지 뒤 더 갈 거리 (m)
-    'v_line': 0.04,          # 선 찾으며 직진 속도 (m/s)
+    'v_line': 0.04,          # 선 찾으며 직진 속도 (m/s): 설 선 근처
+    'v_line_fast': 0.08,     # 바로 앞 선을 지난 뒤 fast_gap까지는 이 속도 (11/3 로그: 선 사이 24 ~ 26 cm를 4 cm/s로 6초)
+    'fast_gap': 0.14,        # 앞 선에서 이만큼까지만 빠르게 (선 사이가 이보다 10 cm 넘게 길어야 안전)
     'ir_black': 3000,        # 이보다 크면 검정 (흰 바닥 ~240, 테이프 ~4095)
     'ir_min_dark': 2,        # 3개 중 이만큼 검정이면 선 (비스듬히 지날 때도 잡히게)
     'confirm': 2,            # 새 센서 값이 연속 이만큼 맞아야 검정/흰색 인정
@@ -116,6 +118,7 @@ class LineCounter:
         self.in_line = False
         self.white_from = None
         self.starts = []
+        self.last_xy = None      # 마지막으로 센 선을 밟은 자리 (odom)
 
     def _sample(self):
         """새 센서 값이 왔으면 검정/흰색 판정 갱신"""
@@ -144,6 +147,7 @@ class LineCounter:
         self.white_from = None if self.black else p[:2]
         if self.black:
             self.starts.append(0.0)
+            self.last_xy = p[:2]
             md.log('[선] 선 위에서 시작 -> 이 선을 #1로 셈')
 
     def tick(self, p, s=0.0):
@@ -158,6 +162,7 @@ class LineCounter:
             if new:
                 self.count += 1
                 self.starts.append(s)
+                self.last_xy = p[:2]
                 md.log(f'[선] #{self.count} 감지')
             return new
         if self.in_line or self.white_from is None:
@@ -255,7 +260,7 @@ class TableDocker:
         return r
 
     # ------------------------------------------------------------ 이동 (선 세며)
-    def _drive(self, dk, lc, x, y, vmax, stop_on=None, c=None):
+    def _drive(self, dk, lc, x, y, vmax, stop_on=None, c=None, fast=None):
         """(x, y)까지 직진하며 선 세기 (Docker.drive_to + 선). stop_on개 세면 그 자리에서 정지. 반환: 선에서 멈췄나
         출발은 accel로 천천히 올림 (정렬 직후 급출발 -> 바퀴 미끄러짐 -> 옆 · 방향 틀어짐 방지).
         방향 보정(w)도 속도가 붙기 전엔 w_start까지만 (서 있는 상태에서 큰 w = 제자리 회전이라 옆으로 밀림)"""
@@ -279,7 +284,12 @@ class TableDocker:
                 break
             now = time.time()
             dt, t_prev = min(now - t_prev, 0.1), now
-            v_want = md.clamp(md.LIN_K * remain, md.LIN_V_MIN, vmax)
+            vcap = vmax
+            if fast and stop_on is not None and lc.count == stop_on - 1 and lc.last_xy is not None:
+                since = math.hypot(p[0] - lc.last_xy[0], p[1] - lc.last_xy[1])
+                if since < fast[1]:
+                    vcap = max(vmax, fast[0])           # 앞 선에서 얼마 안 왔으면 다음 선은 아직 멂 -> 빠르게
+            v_want = md.clamp(md.LIN_K * remain, md.LIN_V_MIN, vcap)
             v = min(v_want, v + acc * dt)               # 가속만 제한 (감속은 remain 비례 그대로)
             w_lim = w0 + (0.4 - w0) * min(1.0, v / max(vmax, 1e-3))
             dk.send(v, md.clamp(md.HEADING_K * md.wrap(line - p[2]), -w_lim, w_lim))
@@ -366,7 +376,7 @@ class TableDocker:
             return f'실패: 정렬 중에 이미 선 {lc.count}개 지남 (entry_ahead 줄이기 / 노드를 선에서 떨어뜨리기)'
         x0, y0 = p[:2]
         far = (x0 + c['line_max'] * math.cos(goal[2]), y0 + c['line_max'] * math.sin(goal[2]))
-        if not self._drive(dk, lc, *far, c['v_line'], stop_on=c['lines']):
+        if not self._drive(dk, lc, *far, c['v_line'], stop_on=c['lines'], fast=(c['v_line_fast'], c['fast_gap'])):
             return f'실패: {c["line_max"] * 100:.0f} cm 가도 {c["lines"]}번째 선 못 찾음 (센 선 {lc.count}개)'
         if c['line_offset'] > 0:
             lc.on = False

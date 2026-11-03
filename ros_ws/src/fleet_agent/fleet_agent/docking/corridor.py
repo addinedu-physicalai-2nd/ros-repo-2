@@ -31,6 +31,7 @@ import numpy as np
 
 from . import marker_dock as md
 from . import records
+from . import scan_match as sm
 from .undock import _set_size
 
 TURN_DEG = -90.0      # N14 · N15에서 오른쪽으로
@@ -63,6 +64,10 @@ PARK_STEER_DEG = 5.0
 PARK_K_HEAD = 2.5
 PARK_W_MAX = 0.25
 PARK_ALPHA = 0.25
+PARK_TRUST_Z = 0.22   # 주차 중 마커가 이보다 멀면 도크 위치를 안 고침 (멀리서 본 2.5 cm 마커는 옆으로 밀려 보임.
+                      # 11/3 D2 · D3 로그: 후진할수록 '옆'이 +1 -> +7 mm로 커지고 로봇이 그 값을 따라감)
+LINE_FIX_M = 0.003    # 칸 정답지(라이다)로 본 줄 자리 옆이 이보다 틀리면 후진 전에 옮김 (칸 안에서는 옆으로 못 감)
+LINE_FIX_DEG = 1.0
 # 통로 가로선 (follow_bars)
 BAR_BLACK = 3800      # 가로선 문턱 (테이프 4095, 튀는 값 ~3500, 흰 바닥 ~240)
 BAR_CONFIRM = 2       # 연속 이만큼 검검검이어야 선
@@ -77,6 +82,8 @@ START_GUARD_M = 0.06  # 출발 자리가 선 근처인데 선 위가 아니었�
 V_BAR_SLOW = 0.04     # 서야 할 선 근처
 SLOW_M = 0.06
 PARK_RETRIES = 1      # 주차 실패 시 시작 자리로 돌아가 다시 하는 횟수
+P1_HOLD_M = 0.12      # P1 예상 선 이만큼 앞부터 라이다 벽 고치기 멈춤 (11/3 로그: 여기서 버림이 늘고 방향이 +3.7~4.6° 튐
+                      # -> 그 방향 그대로 P1에서 시계 90° 돌아 바구니가 비스듬히 들어감)
 P1_SLOW_M = 0.10     # P1은 예상 선 10 cm 앞부터만 천천히 (예전: P2 -> P1 내내 4 cm/s라 약 9초)
 PRE_WAIT_S = 0.5      # 출발 전 벽 방향: 이 안에 벽이 한 번도 안 잡히면 기다리지 않고 출발 (N14는 벽이 안 보임)
 PRE_MAX_DEG = 5.0     # 출발 전 벽 방향 고침이 이보다 크면 잘못 본 것으로 보고 안 고침 (11/2 N14에서 +14.6° 틀었다 되돌림)
@@ -339,14 +346,14 @@ class Steps:
                 break
         return D, phi
 
-    def park(self, marker, stop_rec, target_rec, name='N15', phi=None, retries=PARK_RETRIES):
+    def park(self, marker, stop_rec, target_rec, name='N15', phi=None, retries=PARK_RETRIES, target=None):
         """후면 주차 + 실패하면 다시 하기. 주차 중 실패(마커를 놓침 등)하면 칸 안에 반쯤 걸친 채 끝나지 않게
         주차를 시작한 자리(줄 위, 칸 밖)로 곧게 돌아가 처음부터 한 번 더 함. 그래도 안 되면 예전처럼 실패를 올림
         (취소 md.Cancelled는 RuntimeError가 아니라서 여기서 안 잡힘 -> 바로 멈춤)"""
         p0 = self.mv.dk.pose()
         for attempt in range(retries + 1):
             try:
-                return self._park_once(marker, stop_rec, target_rec, name, phi)
+                return self._park_once(marker, stop_rec, target_rec, name, phi, target)
             except RuntimeError as e:
                 if attempt >= retries:
                     raise
@@ -355,14 +362,101 @@ class Steps:
                 self.go_to(p0[0], p0[1])
                 self.mv.dk.rotate_to(p0[2])
 
-    def _park_once(self, marker, stop_rec, target_rec, name='N15', phi=None):
+    def lidar_line(self, gold, name):
+        """줄 자리(칸 앞)에서 지금 스캔을 정답지 줄 스캔에 겹쳐 칸의 실제 위치를 잼.
+        반환 (도크 목표 odom 자세, 줄 정답 odom 자세, 결과 dict) 또는 (None, None, 결과)"""
+        import time
+        cur = sm.collect(self.lidar, 1.0, time.sleep)        # 1초 = 스캔 약 10장 (잡음 평균)
+        if cur is None:
+            return None, None, {'ok': False, 'why': '/scan 없음'}
+        r = sm.icp(cur, np.asarray(gold['line']))
+        if not r['ok']:
+            self.log(f'[{name} 칸 라이다] 못 믿음: {r["why"]} -> 마커로 주차')
+            return None, None, r
+        p = self.mv.dk.pose()
+        line = sm.compose(p, sm.inverse((r['x'], r['y'], r['th'])))          # 정답 줄 자리 (odom)
+        dock = sm.compose(line, (-float(gold['s_out']), 0.0, 0.0))            # 거기서 곧게 s_out 뒤 = 도크
+        self.log(f'[{name} 칸 라이다] 줄 자리에서 앞뒤 {r["x"] * 1000:+.0f} mm, 옆 {r["y"] * 1000:+.0f} mm, '
+                 f'방향 {math.degrees(r["th"]):+.1f}° (겹침 {r["inlier"] * 100:.0f}%, 오차 {r["rms"] * 1000:.1f} mm)')
+        return dock, line, r
+
+    def pocket_report(self, name, target, gold, extra):
+        """주차 끝: 도크 스캔을 정답지에 겹쳐 남김 (run.log + ~/dock_logs/pocket_lidar.csv). 동작은 안 바뀜"""
+        import csv
+        import datetime
+        import socket
+        import time
+        try:
+            r = {'ok': False, 'why': '정답지 없음 (dock_record lidar)'}
+            if gold:
+                cur = sm.collect(self.lidar, 0.5, time.sleep)
+                r = sm.icp(cur, np.asarray(gold['dock'])) if cur is not None else {'ok': False, 'why': '/scan 없음'}
+            if 'x' in r:
+                self.log(f'[{name} 칸 라이다 끝] 정답 자리와 앞뒤 {r["x"] * 1000:+.0f} mm, 옆 {r["y"] * 1000:+.0f} mm, '
+                         f'방향 {math.degrees(r["th"]):+.1f}° (겹침 {r["inlier"] * 100:.0f}%, '
+                         f'{"믿음" if r["ok"] else "못 믿음: " + r["why"]})')
+            else:
+                self.log(f'[{name} 칸 라이다 끝] {r["why"]}')
+            path = os.path.expanduser('~/dock_logs/pocket_lidar.csv')
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            new = not os.path.exists(path)
+            f3 = (lambda v: '' if v is None else f'{v * 1000:+.1f}')
+            ln = extra.get('line') or {}
+            with open(path, 'a', newline='', encoding='utf-8') as f:
+                w = csv.writer(f)
+                if new:
+                    w.writerow(['시각', '로봇', '도크', '주차 기준', '줄_앞뒤_mm', '줄_옆_mm', '줄_겹침',
+                                '마커-라이다_도크_옆_mm', '끝_앞뒤_mm', '끝_옆_mm', '끝_방향_deg', '끝_겹침', '끝_믿음',
+                                '이유', '로그폴더'])
+                w.writerow([datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'), socket.gethostname(), target,
+                            extra.get('mode', ''), f3(ln.get('x')), f3(ln.get('y')),
+                            f'{ln["inlier"]:.2f}' if 'inlier' in ln else '', f3(extra.get('mk_lat')),
+                            f3(r.get('x')), f3(r.get('y')),
+                            f'{math.degrees(r["th"]):+.2f}' if 'th' in r else '',
+                            f'{r["inlier"]:.2f}' if 'inlier' in r else '', 'y' if r.get('ok') else 'n',
+                            r.get('why', '') or ln.get('why', ''), os.path.basename(md.LOG_DIR or '')])
+        except Exception as e:  # noqa: BLE001
+            self.log(f'[{name} 칸 라이다 끝] 기록 실패: {e}')
+
+    def record_pocket(self, target, s_out, secs=2.0):
+        """도크 칸에 손으로 반듯하게 넣은 자리(정답)에서: 도크 스캔 -> 곧게 s_out 앞으로 (줄 자리) -> 줄 스캔
+        -> records/lidar_<target>.json. 옆 칸은 비워 두고 찍기 (옆 칸 로봇은 나중에 '기록에 없던 점'으로 걸러짐)"""
+        import datetime
+        import socket
+        import time
+        dock = sm.collect(self.lidar, secs, time.sleep)
+        if dock is None:
+            raise RuntimeError('/scan 이 안 들어옴 (bringup 켰나요?)')
+        h = self.mv.dk.pose()[2]
+        self.mv.drive(s_out, False, h, V_NEAR)
+        self.mv.stop(0.3)
+        line = sm.collect(self.lidar, secs, time.sleep)
+        if line is None:
+            raise RuntimeError('줄 자리에서 /scan 이 안 들어옴')
+        out = {'target': target, 's_out': float(s_out), 'host': socket.gethostname(),
+               'date': datetime.datetime.now().strftime('%Y-%m-%d %H:%M'),
+               'dock': [[round(float(x), 4), round(float(y), 4)] for x, y in sm.trim(dock, n=sm.MAX_REF)],
+               'line': [[round(float(x), 4), round(float(y), 4)] for x, y in sm.trim(line, n=sm.MAX_REF)]}
+        _save(f'lidar_{target}.json', out)
+        return (f'저장 lidar_{target}.json: 도크 점 {len(out["dock"])}개, 줄 점 {len(out["line"])}개 '
+                f'(줄 자리 = 도크에서 {s_out * 100:.1f} cm 앞). 로봇은 지금 줄 자리 (칸 앞)')
+
+    def _park_once(self, marker, stop_rec, target_rec, name='N15', phi=None, target=None):
         """후면 주차 (실무 도킹 방식: 움직이면서 계속 보고, 정답 자세와 비교하며 줄을 따라감)
         - 정답 = D3 기록 자세. 벽 방향은 N15에서 멈춰서 잰 값(가장 정확)으로 고정
           (phi를 주면 그 값으로 고정: D1은 라이다 앞 벽 방향)
         - 후진 중 매 프레임 마커 위치를 재서 도크 위치를 조금씩 고침 (가까울수록 많이 믿음)
         - 줄에서 옆으로 벗어난 만큼만 아주 살짝 기움 (최대 PARK_STEER_DEG, 회전 속도 PARK_W_MAX 제한) -> 크게 안 틈
-        - 끝: 멈춰서 정답 자세와 비교, 앞뒤 · 방향 마무리"""
+        - 끝: 멈춰서 정답 자세와 비교, 앞뒤 · 방향 마무리
+        v2 (11/3 로그, 칸 벽에 닿음):
+        - 후진 줄 = 칸 축 (기록 도크 방향 gth). 예전엔 앞 벽 수직이라 D2는 칸 축과 1.5° 달라 비스듬히 들어감
+        - 마커가 PARK_TRUST_Z보다 멀면 도크 위치를 안 고침 (멀리서 본 값은 옆으로 밀려 보임 -> odom으로 곧게)
+        - 칸 라이다 정답지(records/lidar_<target>.json)가 있고 줄 자리 스캔이 잘 겹치면: 도크 목표를 라이다로 잡음
+          (칸 모양 그대로 = 칸 벽 기준). 줄 자리가 옆 · 앞뒤로 틀어져 있으면 후진 전에 옮김 (칸 안에서는 옆으로 못 감)
+          겹침이 모자라면 (사람 · 옆 칸 로봇 등) 예전처럼 마커로. 끝에 도크 스캔을 정답지와 비교해 남김"""
         import time
+        gold = sm.load(target)
+        extra = {'mode': '마커'}
         if self.on_pocket is not None:                # 이제 칸 안 (칸 쪽을 봄): 여기서 끊기면 빠지기(leave)부터
             self.on_pocket()
         if phi is None:                               # D2 · D3: 줄 방향은 라이다 앞 벽 (안 보이면 예전처럼 마커 기울기)
@@ -372,26 +466,49 @@ class Steps:
         size = g.get('size', 0.025)
         _set_size(size)
         self.cam.id = marker
-        line_h = md.wrap(phi + math.pi)
         goal = md.dock_to_odom(D, phi, g['gx'], g['gy'], g['gth'])
+        use_lidar = False
+        if gold and self.lidar is not None:
+            dock_l, line_l, rl = self.lidar_line(gold, name)
+            extra['line'] = rl
+            if dock_l is not None:
+                ax = md.wrap(dock_l[2] - math.pi)
+                extra['mk_lat'] = self._rel(goal, dock_l, ax)[0]          # 마커 목표가 라이다 목표에서 옆으로 얼마나
+                self.log(f'[{name}] 도크 목표: 마커와 라이다 차이 옆 {extra["mk_lat"] * 1000:+.0f} mm -> 라이다(칸 기준)로 주차')
+                p = self.mv.dk.pose()
+                lat0, along0, dth0 = self._rel(p, line_l, ax)
+                if abs(lat0) > LINE_FIX_M:          # 칸 안에서는 옆으로 못 가니 들어가기 전에 옆을 맞춤 (앞뒤는 후진 거리로 됨)
+                    self.log(f'[{name}] 줄 자리 옮김: 옆 {lat0 * 1000:+.0f} mm, 앞뒤 {along0 * 1000:+.0f} mm, '
+                             f'방향 {math.degrees(dth0):+.1f}°')
+                    self.go_to(line_l[0], line_l[1])
+                    self.mv.dk.rotate_to(line_l[2])
+                elif abs(math.degrees(dth0)) > LINE_FIX_DEG:
+                    self.mv.dk.rotate_to(line_l[2])
+                goal, use_lidar, extra['mode'] = dock_l, True, '라이다'
+        line_h = goal[2]                              # 칸 축 (기록 때 칸에서 곧게 나온 방향)
+        phi_ax = md.wrap(line_h - math.pi)            # 칸 축 기준 (옆 · 앞뒤를 이 축으로 잼)
         p = self.mv.dk.pose()
-        self.log(f'[주차] 도크까지 {self._rel(p, goal, phi)[1] * 100:.1f} cm 후진 (줄 따라가기)')
+        self.log(f'[주차] 도크까지 {self._rel(p, goal, phi_ax)[1] * 100:.1f} cm 후진 '
+                 f'({"라이다 목표, odom으로 곧게" if use_lidar else "마커 목표"}, 칸 축 = 앞 벽 수직에서 '
+                 f'{math.degrees(md.wrap(line_h - phi - math.pi)):+.1f}°)')
         t0 = last = time.time()
-        v_prev, n_seen, k = 0.0, 0, 0
+        v_prev, n_seen, n_used, k = 0.0, 0, 0, 0
         while time.time() - t0 < 25.0:
             tick = time.time()
-            m = self.cam.measure()
+            m = self.cam.measure() if not use_lidar else None
             p = self.mv.dk.pose()
             if m is not None:
-                Dm = np.array(p[:2]) + md.rot(p[2]) @ np.array([md.CAM_X_M + m['tz'], -m['tx']])
-                a = PARK_ALPHA * min(1.0, (0.15 / max(m['tz'], 0.15)) ** 2)
-                D = D + a * (Dm - D)
-                goal = md.dock_to_odom(D, phi, g['gx'], g['gy'], g['gth'])
+                if m['tz'] < PARK_TRUST_Z:
+                    Dm = np.array(p[:2]) + md.rot(p[2]) @ np.array([md.CAM_X_M + m['tz'], -m['tx']])
+                    a = PARK_ALPHA * min(1.0, (0.15 / max(m['tz'], 0.15)) ** 2)
+                    D = D + a * (Dm - D)
+                    goal = md.dock_to_odom(D, phi, g['gx'], g['gy'], g['gth'])
+                    n_used += 1
                 last, n_seen = tick, n_seen + 1
-            elif tick - last > 1.0:
+            elif not use_lidar and tick - last > 1.0:
                 self.mv.stop(0.1)
                 raise RuntimeError('주차 중 마커를 1초 넘게 못 봄')
-            lat, along, _ = self._rel(p, goal, phi)
+            lat, along, _ = self._rel(p, goal, phi_ax)
             if along < 0.002:
                 break
             corr = -math.atan(PARK_K_LAT * lat)
@@ -406,9 +523,14 @@ class Steps:
                          f'방향 {math.degrees(md.wrap(p[2] - line_h)):+.1f}°')
             time.sleep(max(0.0, 1.0 / PARK_HZ - (time.time() - tick)))
         self.mv.stop(0.1)
-        self.log(f'[주차] 후진 끝 ({time.time() - t0:.1f}초, 마커 {n_seen}번 봄)')
+        self.log(f'[주차] 후진 끝 ({time.time() - t0:.1f}초, '
+                 + ('라이다 목표 · odom' if use_lidar else f'마커 {n_seen}번 봄 · 그중 {n_used}번 위치에 씀') + ')')
         # 끝: 멈춰서 정답과 비교 -> 방향 · 앞뒤
         self.mv.dk.rotate_to(goal[2])
+        if use_lidar:
+            if target:
+                self.pocket_report(name, target, gold, extra)
+            return
         for k in range(1, 3):
             m = self.see(marker, size, frames=10)
             if m is None:
@@ -416,13 +538,15 @@ class Steps:
                 return
             p, Dm = self._marker_odom(m)
             goal = md.dock_to_odom(Dm, phi, g['gx'], g['gy'], g['gth'])
-            lat, along, dth = self._rel(p, goal, phi)
+            lat, along, dth = self._rel(p, goal, phi_ax)
             self.log(f'[주차 끝 {k}] 정답과: 옆 {lat * 1000:+.0f} mm, 앞뒤 {along * 1000:+.0f} mm, '
                      f'방향 {math.degrees(dth):+.1f}° (마커 {m["tz"] * 100:.1f} cm)')
             if abs(along) < FIX_M:
                 break
             self.mv.move_along(-along, p[2])
             self.mv.dk.rotate_to(goal[2])
+        if target:
+            self.pocket_report(name, target, gold, extra)
 
     def _bar_hit(self, st):
         if self.mv.ir.get('n', 0) != st['n']:
@@ -609,14 +733,14 @@ class Steps:
         self.reach(via, f'{name} 거리', vmax=V_NEAR)
         self.turn(float(cfg.get('turn_deg', TURN_DEG)), name)
         self.park(int(cfg['marker']), _load(f'~/dock_target_{cfg["stop"]}.json'),
-                  _load(f'~/dock_target_{cfg["target"]}.json'), name)
+                  _load(f'~/dock_target_{cfg["target"]}.json'), name, target=cfg['target'])
 
     def park_from_line(self, cfg):
         """도크 줄 가로선(N15 / N16) 위에서 남쪽을 보고 섬 -> 우90 -> 마커로 줄 기록 자세 맞춤 -> 후면 주차"""
         name = str(cfg['stop']).upper()
         self.turn(float(cfg.get('turn_deg', TURN_DEG)), name)
         self.park(int(cfg['marker']), _load(f'~/dock_target_{cfg["stop"]}.json'),
-                  _load(f'~/dock_target_{cfg["target"]}.json'), name)
+                  _load(f'~/dock_target_{cfg["target"]}.json'), name, target=cfg['target'])
 
     def follow_bars(self, names, start, on_pass=None, resume=False):
         """통로 후진 (남쪽을 보고 북쪽으로): 방향 = 라이다 양옆 벽과 평행, 옆 = 서쪽 벽에서 W_REF.
@@ -660,6 +784,7 @@ class Steps:
         nfix = nskip = k = 0
         v_prev = 0.0
         why = 'none'
+        held = False
         t0 = time.time()
         while seq and time.time() - t0 < 60.0:
             tick = time.time()
@@ -670,7 +795,13 @@ class Steps:
             stop = seq[-1]
             p = self.mv.dk.pose()
             pts = self.lidar.take() if self.lidar else None
-            if pts is not None:
+            hold = (i < len(seq) and seq[i] == 'P1'
+                    and ref_U + BAR_GAP.get('P1', 0.37) - U < P1_HOLD_M)   # P1 바로 앞: 벽 모양이 바뀌어 라이다가 헷갈림
+            if hold and not held:
+                held = True
+                self.log(f'  P1 앞 {P1_HOLD_M * 100:.0f} cm: 벽 방향 · 옆 고치기 멈춤 (지금 방향 그대로, 벽 고침 '
+                         f'{math.degrees(md.wrap(h_c - h0)):+.1f}°)')
+            if pts is not None and not hold:
                 fl = side_lines(pts, along=WALL_ALONG_M)
                 angs = [a for (d_, a, n_, e_) in fl.values() if n_ >= WALL_MIN_PTS and e_ < WALL_MAX_STD]
                 if len(angs) == 2 and abs(angs[0] - angs[1]) > math.radians(2.0):

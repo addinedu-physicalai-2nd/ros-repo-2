@@ -100,6 +100,8 @@ ros2 run fleet_agent marker_dock --dry-run --id 3     # 계획만 보기
 - 목표 파일은 마커 ID별이다 (D1 `--id 1`). 주방 통로 쪽(N14 · D3 · D2)은 아래 `dock_record`로 기록한다
 - 도킹 로그 · 사진은 `~/dock_logs/`에 도킹마다 남는다
 - 정밀 동작 한 번마다 `~/dock_logs/summary.csv`에 한 줄 (시각 · 로봇 · 노드 · method · 결과 ok/fail/timeout/cancelled · 소요초 · 실패 이유 · 로그폴더). 단계별 시간은 그 폴더의 `run.log`
+- 제자리 회전 시험: `ros2 run fleet_agent dock_record spin` (fleet_agent 끄고, 벽이 보이는 자리) -> odom 회전 vs 실제(라이다) 비율, 바퀴 간격 보정값. 결과 `~/dock_logs/spin_check.csv`. 로봇마다 한 번
+- D2 · D3 칸 라이다 정답지: 칸에 손으로 반듯하게 넣고(옆 칸은 비우고) `ros2 run fleet_agent dock_record lidar --dock d2` -> `records/lidar_d2.json` (도크 · 줄 자리 스캔). 있으면 주차 때 줄 자리 스캔을 겹쳐(ICP) 칸 위치로 주차하고, 겹침이 모자라면(사람 · 물건) 마커로. 결과는 `~/dock_logs/pocket_lidar.csv`
 
 ## 주방 통로 · 픽업 · 도크 (N13 → N14 → N15/N16 → P2 → P1 → N4)
 

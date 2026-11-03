@@ -12,14 +12,8 @@
   undock (D1): 앞 벽 수직(라이다) -> 마커 1 거리로 곧게 앞으로 교점 -> [우로 450° 이어서 회전 = 우90 + 한 바퀴, AMCL] -> 통로 벽과 평행 북쪽
         (그다음 fleet_agent가 Nav2로 N1). 마커 6 · 남쪽은 안 봄 (그건 dock / record)
 기록 파일: ~/align_d1s.json (주로) · ~/dock_target_d1.json · ~/dock_target_d1line.json
-그림자 측정 (동작은 안 바뀜): dock에서 마커 6을 잴 때마다 같은 자리에서 라이다 앞 벽(남쪽 끝 벽) 거리도 재서
-  run.log + ~/dock_logs/shadow_d1.csv에 나란히 남김 -> 마커 6 대신 라이다로 교점을 잡아도 되는지 판단용
 """
-import csv
-import datetime
 import math
-import os
-import socket
 import time
 
 import numpy as np
@@ -33,8 +27,6 @@ LAT_K = 3.0            # 서쪽 벽 거리 1 cm 틀리면 1.7° 기울여 감
 LAT_DEG = 6.0
 W_MAX = 0.25
 CLOSE_TZ = 0.15        # 마커 1을 이 거리에서 재서 벽 방향을 정확히 (2.5 cm 마커는 22 cm 안에서만 기울기를 믿음)
-SHADOW_SECS = 0.5      # 그림자 측정: 라이다 앞 벽을 이만큼 잼 (마커 6 측정 한 번에 이만큼 더 걸림)
-SHADOW_CSV = '~/dock_logs/shadow_d1.csv'
 END_GONE_M = 0.05      # 칸막이가 이만큼 이어서 안 보이면 끝 (N1)
 END_MIN_M = 0.40       # 이보다 가까운 끊김은 무시 (칸막이 이음새)
 END_MAX_M = 1.60
@@ -119,45 +111,27 @@ class Entrance(Steps):
             self.mv.dk.rotate_to(md.wrap(self.mv.dk.pose()[2] - th))
         return self.mv.dk.pose()[2]
 
-    def shadow_front(self, tag, a6, a6_rec):
-        """그림자 측정: 지금 자리(남쪽을 봄)에서 라이다 앞 벽(마커 6 벽)까지 거리. 로봇은 안 움직임.
-        마커 6 거리(a6)와 나란히 기록 -> 둘의 차가 매번 거의 같으면 라이다로 바꿔도 됨 (차가 들쭉날쭉하면 안 됨)
-        실패해도 도킹에는 영향 없음"""
-        try:
-            ds, angs, t_end = [], [], time.time() + SHADOW_SECS
-            while time.time() < t_end:
-                pts = self.lidar.take() if self.lidar is not None else None
-                if pts is not None:
-                    r = front_wall(pts)
-                    if r is not None:
-                        ds.append(r[0])
-                        angs.append(r[1])
-                time.sleep(0.03)
-            d = float(np.median(ds)) if len(ds) >= 3 else None
-            ang = math.degrees(float(np.median(angs))) if len(angs) >= 3 else None
-            spread = float(np.std(ds)) if len(ds) >= 3 else None
-            if d is None:
-                self.log(f'[{tag} 그림자] 라이다 앞 벽 안 잡힘 ({len(ds)}번)')
-            else:
-                diff = f', 마커-라이다 {(a6 - d) * 100:+.1f} cm' if a6 is not None else ''
-                self.log(f'[{tag} 그림자] 라이다 앞 벽 {d * 100:.1f} cm (흔들림 {spread * 1000:.1f} mm, 기울기 {ang:+.1f}°, '
-                         f'{len(ds)}번){diff}')
-            path = os.path.expanduser(SHADOW_CSV)
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-            new = not os.path.exists(path)
-            with open(path, 'a', newline='', encoding='utf-8') as f:
-                w = csv.writer(f)
-                if new:
-                    w.writerow(['시각', '로봇', '단계', '마커6_cm', '기록_마커6_cm', '라이다_cm', '라이다_흔들림_mm',
-                                '라이다_기울기_deg', '라이다_횟수', '마커-라이다_cm', '로그폴더'])
-                c = (lambda v: '' if v is None else f'{v * 100:.2f}')
-                w.writerow([datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'), socket.gethostname(), tag,
-                            c(a6), c(a6_rec), c(d), '' if spread is None else f'{spread * 1000:.1f}',
-                            '' if ang is None else f'{ang:+.2f}', len(ds),
-                            c(a6 - d) if (a6 is not None and d is not None) else '',
-                            os.path.basename(md.LOG_DIR or '')])
-        except Exception as e:  # noqa: BLE001
-            self.log(f'[{tag} 그림자] 기록 실패: {e}')
+    def front_reach(self, goal, h_w, tag, secs=0.6):
+        """서쪽(h_w)을 본 채 라이다 앞 벽(마커 1 벽)까지 거리를 goal로 (곧게 앞뒤만). 마커 맞추기 전에 큰 동서 오차를 먼저 없앰.
+        11/3 로그: 통로를 '양쪽 벽 가운데'로 와서 교점에서 서쪽 벽까지 25 cm (줄 자리는 약 16 cm) -> 마커 맞추기가
+        8 cm를 고치느라 3.5초. 앞 벽이 안 잡히면 아무것도 안 함 (마커 맞추기가 예전처럼 고침)"""
+        ds, t_end = [], time.time() + secs
+        while time.time() < t_end:
+            pts = self.lidar.take() if self.lidar is not None else None
+            if pts is not None:
+                r = front_wall(pts)
+                if r is not None:
+                    ds.append(r[0])
+            time.sleep(0.03)
+        if len(ds) < 3:
+            self.log(f'[{tag}] 앞 벽이 라이다에 안 잡힘 -> 마커로')
+            return
+        e = float(np.median(ds)) - goal
+        self.log(f'[{tag}] 라이다 앞 벽 {(e + goal) * 100:.1f} cm (줄 자리 {goal * 100:.1f}) -> '
+                 + (f'{"앞" if e > 0 else "뒤"}로 {abs(e) * 100:.1f} cm' if abs(e) > 0.01 else '그대로'))
+        if 0.01 < abs(e) < 0.15:
+            self.mv.move_along(e, h_w)
+            self.mv.dk.rotate_to(h_w)
 
     def wall_heading(self, tag):
         """멈춘 채 양옆 벽과 평행하게 돎. 반환 (벽 기준 방향, 벽 거리들)"""
@@ -425,7 +399,6 @@ class Entrance(Steps):
             if self.exit_requested():
                 return self._exit_at_cross(md.wrap(h + math.pi), '교점')
             a6 = self.along6(h, f'교점 {k}', self.M6)
-            self.shadow_front(f'교점 {k}', a6, rec.get('along6'))
             if a6 is None:
                 break
             e = a6 - rec['along6']
@@ -442,6 +415,7 @@ class Entrance(Steps):
         h_w = self.front_square('교점 벽 수직')
         if self.exit_requested():                     # 서쪽(D1 쪽)을 봄, 아직 후진 전 -> 북쪽 = 우90
             return self._exit_at_cross(md.wrap(h_w - math.pi / 2), '교점')
+        self.front_reach(md.CAM_X_M + rec['line_tz'], h_w, '교점 동서')
         self.park(1, _load('~/dock_target_d1line.json'), _load('~/dock_target_d1.json'), 'D1',
                   phi=md.wrap(h_w + math.pi))
         m = self.see(1, 0.025, frames=15)

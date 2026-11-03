@@ -363,7 +363,7 @@ class DockingNode(Node):
             st = self.steps(marker, f'{node}_redock')
             md.log(f'[{node}] 위치 맞추기 뒤 다시 주차 (마커 {marker})')
             st.park(marker, _load(f'~/dock_target_{req["stop"]}.json'), _load(f'~/dock_target_{req["target"]}.json'),
-                    str(node))
+                    str(node), target=req['target'])
             return '성공'
         return f'실패: redock 모르는 kind {kind}'
 
