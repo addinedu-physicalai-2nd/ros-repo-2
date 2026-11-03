@@ -51,6 +51,8 @@ struct Config {
   std::string guide_greet_node;   // 안내: 이 노드에서 손님을 맞음 (입구 로봇이 여기로 나와 키오스크 쪽을 보고 손님을 기다림). "" = 예전 (도크에서 바로)
   std::string guide_greet_face;   // 맞는 노드에서 바라볼 노드 (키오스크 쪽, 예: D1)
   std::map<std::string, std::string> guide_spots;  // 안내: 테이블 -> 서는 노드 (그 노드에서 테이블 쪽을 봄). 없으면 테이블 정차점
+  bool guide_spot_nearest = false;  // true = 서는 노드를 서빙처럼 테이블 양옆 중 가까운 쪽으로 (같으면 guide_spots)
+  std::vector<std::string> guide_spot_avoid;  // 안내가 서면 안 되는 노드 (병목: 서 있으면 다른 길이 없음)
   bool table_pass_through = false;  // 테이블은 지나가며 서고 반대 노드로 나감 (들어갈 때 나갈 칸까지 같이 잡음)
   int serve_batch_max = 3;       // 같은 테이블 주문을 한 번에 싣는 최대 건수
   int reassign_after_sec = 10;   // 적재 전 로봇이 이만큼 고장 · 통신 끊김이면 다른 로봇에 다시 배정

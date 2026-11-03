@@ -38,6 +38,8 @@ bool loadConfig(const std::string& path, Config& cfg, std::string& error) {
     if (root["guide_greet_node"]) cfg.guide_greet_node = root["guide_greet_node"].as<std::string>();
     if (root["guide_greet_face"]) cfg.guide_greet_face = root["guide_greet_face"].as<std::string>();
     if (root["guide_spots"]) cfg.guide_spots = root["guide_spots"].as<std::map<std::string, std::string>>();
+    if (root["guide_spot_nearest"]) cfg.guide_spot_nearest = root["guide_spot_nearest"].as<bool>();
+    if (root["guide_spot_avoid"]) cfg.guide_spot_avoid = root["guide_spot_avoid"].as<std::vector<std::string>>();
     if (root["table_pass_through"]) cfg.table_pass_through = root["table_pass_through"].as<bool>();
     if (root["serve_batch_max"]) cfg.serve_batch_max = root["serve_batch_max"].as<int>();
     if (root["reassign_after_sec"]) cfg.reassign_after_sec = root["reassign_after_sec"].as<int>();

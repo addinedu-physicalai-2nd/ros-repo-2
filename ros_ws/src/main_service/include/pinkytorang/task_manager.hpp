@@ -169,6 +169,7 @@ class TaskManager {
   std::string pickDockFor(const std::string& robot_id) const;
   Robot* findRobot(const std::string& id);
   Task* findTask(int id);
+  std::string guideSpot(const Task& t, const std::string& table_node) const;
   Table* findTable(const std::string& id);
   TaskView view(const Task& t) const;
   SnapshotView buildSnapshot();

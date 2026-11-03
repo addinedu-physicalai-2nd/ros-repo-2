@@ -1,6 +1,7 @@
 #include "pinkytorang/task_manager.hpp"
 
 #include <algorithm>
+#include <cmath>
 
 #include "pinkytorang/log.hpp"
 
@@ -1044,6 +1045,32 @@ void TaskManager::enterStage(Task& t, Stage s) {
   }
 }
 
+// 안내할 때 설 노드. guide_spot_nearest면 서빙이 테이블로 들어갈 때와 같은 기준:
+//   테이블 노드 양옆 길 노드 중 (로봇 -> 그 노드 경로 + 그 노드 -> 테이블) 이 짧은 쪽 = 서빙 최단 경로가 들어가는 쪽
+//   같으면 guide_spots 쪽. guide_spot_avoid 노드는 후보에서 뺌.
+//   끄거나 못 정하면 guide_spots 고정 (가운데 줄 N3 · N6 · N9), 그것도 없으면 "" = 테이블 노드
+std::string TaskManager::guideSpot(const Task& t, const std::string& table_node) const {
+  std::string fixed = cfg_.guide_spots.count(t.table) && map_.node(cfg_.guide_spots.at(t.table))
+                          ? cfg_.guide_spots.at(t.table) : "";
+  const MapNode* tn = map_.node(table_node);
+  if (!cfg_.guide_spot_nearest || !tn) return fixed;
+  std::string best;
+  double best_cost = -1;
+  for (const std::string& n : tn->next) {
+    const MapNode* m = map_.node(n);
+    if (!m || m->type != "PASS") continue;  // 테이블 옆 길 노드만
+    if (std::find(cfg_.guide_spot_avoid.begin(), cfg_.guide_spot_avoid.end(), n) != cfg_.guide_spot_avoid.end()) continue;  // 병목 노드 (N2 = 입구 ↔ 홀 유일한 칸, N4 = 픽업 나오는 칸)
+    double c = traffic_.pathCost(t.robot, n);
+    if (c < 0) continue;
+    c += map_.pathLength({n, table_node});
+    if (best_cost < 0 || c < best_cost - 1e-6 || (std::abs(c - best_cost) <= 1e-6 && n == fixed)) {
+      best = n;
+      best_cost = c;
+    }
+  }
+  return best.empty() ? fixed : best;
+}
+
 void TaskManager::goTo(Task& t, const std::string& node) {
   t.goal_node = node;
   display(t.robot, stageText(t, t.stage), 0);  // 문구 먼저 (카운트다운 지움), 그다음 이동
@@ -1052,9 +1079,11 @@ void TaskManager::goTo(Task& t, const std::string& node) {
   std::string go = node, face;
   if (t.kind == TaskKind::GUIDE && t.stage == Stage::ASSIGNED && node == cfg_.guide_greet_node)
     face = cfg_.guide_greet_face;   // 맞는 자리: 키오스크 쪽을 보고 섬
-  if (guide && cfg_.guide_spots.count(t.table) && map_.node(cfg_.guide_spots.at(t.table))) {
-    // 안내는 테이블 칸에 안 들어가고 옆 노드(guide_spots)에서 테이블 쪽을 보고 선다 (서빙 라인트레이싱과 안 겹치게)
-    go = cfg_.guide_spots.at(t.table);
+  std::string spot = guide ? guideSpot(t, node) : "";
+  if (!spot.empty()) {
+    // 안내는 테이블 칸에 안 들어가고 옆 노드에서 테이블 쪽을 보고 선다 (서빙 라인트레이싱과 안 겹치게)
+    // 그 노드가 목적지라 서 있는 동안 그 노드를 잠그고, 다음 길로 떠나면 풂 (평소 노드 잠금 그대로)
+    go = spot;
     face = node;
     t.goal_node = go;  // 도착 판정은 실제로 서는 노드로
   }
