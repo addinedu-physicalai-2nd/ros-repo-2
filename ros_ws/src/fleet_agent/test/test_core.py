@@ -1164,3 +1164,38 @@ def test_entrance_d1_new_job_while_turning_at_n1_skips_corridor():
     run(r, d, 40, hook=hook)
     assert sent['done'] and r.prec == []
     assert reached(r) == ['N1', 'D1', 'N1', 'N2']
+
+
+def test_corridor_d3_new_job_before_pocket_skips_dock():
+    # D3로 복귀하며 통로 후진 중(칸 들어가기 전) 서빙이 붙음 (서버: D3 뒤에 [N15 N16 P2 P1] APPEND)
+    # -> 도는 docking에 then 빼기(extend) -> N15에서 섬 -> D3 · N15는 지나간 것으로 -> N16부터 통로 -> P1 tape
+    r, d = corr_make()
+    d.on_move(102, False, FORWARD, wp('N14', yaw=0.0), False, 'D3')
+    d.on_move(102, True, REVERSE, wp('N15') + [('D3',) + NODES['D3'] + (3.1416,)], False, 'D3')
+    st = {'done': False}
+
+    def hook(t):
+        if not st['done'] and r.corr and r.corr['final'] is None and r.corr['i'] == 0:
+            st['done'] = True
+            d.on_move(102, True, REVERSE, wp('N15', 'N16', 'P2', 'P1'), False, 'P1')
+    run(r, d, 60, hook=hook)
+    assert st['done']
+    assert r.extends[0] == {'nodes': ['N15'], 'then': None}
+    assert 'D3:dock_in' not in r.prec and r.prec[-1] == 'P1:tape'
+    assert reached(r) == ['N14', 'N15', 'D3', 'N15', 'N16', 'P2', 'P1']
+    ev = [(t, n) for t, n, _ in r.events]
+    assert (DOCKED, 'D3') not in ev and (UNDOCKED, 'D3') not in ev
+    assert [n for t, n, _ in r.events if t == CMD_DONE] == ['P1']
+
+
+def test_corridor_d3_new_job_before_handover_stops_at_line():
+    # N14 정렬 전에 이미 서빙이 붙어 있음 -> 통로 docking을 처음부터 N15까지만 (dock_in 없음) -> 이어서 P1
+    r, d = corr_make()
+    d.on_move(103, False, FORWARD, wp('N14', yaw=0.0), False, 'D3')
+    d.on_move(103, True, REVERSE, wp('N15') + [('D3',) + NODES['D3'] + (3.1416,)], False, 'D3')
+    d.on_move(103, True, REVERSE, wp('N15', 'N16', 'P2', 'P1'), False, 'P1')
+    run(r, d, 60)
+    corr = [q for q in r.reqs if q['method'] == 'corridor']
+    assert corr[0]['nodes'] == ['N15'] and corr[0]['then'] is None
+    assert 'D3:dock_in' not in r.prec and r.prec[-1] == 'P1:tape'
+    assert reached(r) == ['N14', 'N15', 'D3', 'N15', 'N16', 'P2', 'P1']
