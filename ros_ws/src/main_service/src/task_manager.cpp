@@ -765,6 +765,32 @@ void TaskManager::rebalanceStandby() {
   int have = entranceStandbyCount();
 
   if (have < want) {
+    // 픽업 쪽 도크(D2 · D3)로 돌아가는 중인 로봇부터 입구로 돌린다 (만석이 풀림 등): 들어가 도킹했다 다시 빠져 나오지 않게
+    std::string ret, ret_dock;
+    double ret_cost = 1e9;
+    for (auto& pair : robots_) {
+      Robot& r = pair.second;
+      if (!robotUsable(r) || r.charging || traffic_.isStationary(r.id) || !entranceOk(r.id)) continue;  // 배터리 낮으면 입구 X
+      const std::string goal = traffic_.goalOf(r.id);
+      const MapNode* g = map_.node(goal);
+      if (!g || g->stop_kind != "DOCK" || dispatch_.isEntranceDock(goal)) continue;
+      Task* t = findTask(r.task_id);
+      bool returning = t ? (t->stage == Stage::TO_DOCK) : r.homing;
+      if (!returning) continue;
+      std::string dock = dispatch_.pickDock(r.id, true);
+      if (!dispatch_.isEntranceDock(dock)) continue;
+      double c = traffic_.pathCost(r.id, dock);
+      if (c >= 0 && c < ret_cost) {
+        ret_cost = c;
+        ret = r.id;
+        ret_dock = dock;
+      }
+    }
+    if (!ret.empty() && redirectDock(robots_[ret], ret_dock)) {
+      record("TASK", ret + " 픽업 쪽으로 돌아가다 입구 대기로 바꿈 -> " + ret_dock + " (입구 " + std::to_string(have) + "/" +
+                         std::to_string(want) + ")");
+      return;
+    }
     std::string best;
     double best_cost = 1e9;
     for (auto& pair : robots_) {
