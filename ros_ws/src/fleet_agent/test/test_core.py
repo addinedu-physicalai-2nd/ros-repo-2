@@ -1199,3 +1199,80 @@ def test_corridor_d3_new_job_before_handover_stops_at_line():
     assert corr[0]['nodes'] == ['N15'] and corr[0]['then'] is None
     assert 'D3:dock_in' not in r.prec and r.prec[-1] == 'P1:tape'
     assert reached(r) == ['N14', 'N15', 'D3', 'N15', 'N16', 'P2', 'P1']
+
+
+def test_corridor_replace_during_n14_align_keeps_align():
+    # N14 정렬 중 REPLACE (예: 서버 resend · 이어받기) -> 정렬을 끊지 않음 -> 끝난 뒤 새 길로, 통로 docking (라이다 후진 X)
+    r, d = corr_make()
+    r.prec_delay = 5                     # 정렬하는 동안 (결과 전) REPLACE
+    d.on_move(120, False, FORWARD, wp('N14', yaw=0.0), False, 'D3')
+    d.on_move(120, True, REVERSE, wp('N15'), False, 'D3')
+    st = {'done': False, 'ph': set()}
+
+    def hook(t):
+        st['ph'].add(d.phase)
+        if not st['done'] and d.phase == 'align':
+            st['done'] = True
+            d.on_move(121, False, REVERSE, wp('N15', 'N16'), False, 'P1')
+            d.on_move(121, True, REVERSE, wp('P2', 'P1'), False, 'P1')
+    run(r, d, 60, hook=hook)
+    assert r.prec_cancelled == 0
+    assert r.prec == ['N14:align', 'P1:corridor', 'P1:tape']
+    assert 'reverse' not in st['ph']
+    assert reached(r) == ['N14', 'N15', 'N16', 'P2', 'P1']
+    assert [n for t, n, _ in r.events if t == CMD_DONE] == ['P1']
+
+
+def test_corridor_replace_while_backing_to_dock_decides_at_line():
+    # D3로 통로 후진 중(칸 전) REPLACE [N16 P2 P1] -> 도킹 빼고(extend) N15에서 섬 -> 거기서 새 길 (D3 안 들어감)
+    r, d = corr_make()
+    d.on_move(122, False, FORWARD, wp('N14', yaw=0.0), False, 'D3')
+    d.on_move(122, True, REVERSE, wp('N15') + [('D3',) + NODES['D3'] + (3.1416,)], False, 'D3')
+    st = {'done': False}
+
+    def hook(t):
+        if not st['done'] and r.corr and r.corr['final'] is None and r.corr['i'] == 0:
+            st['done'] = True
+            d.on_move(123, False, REVERSE, wp('N15', 'N16', 'P2', 'P1'), False, 'P1')
+    run(r, d, 60, hook=hook)
+    assert r.prec_cancelled == 0 and r.extends[0] == {'nodes': ['N15'], 'then': None}
+    assert 'D3:dock_in' not in r.prec and r.prec[-1] == 'P1:tape'
+    assert reached(r) == ['N14', 'N15', 'N16', 'P2', 'P1']
+    assert [n for t, n, _ in r.events if t == CMD_DONE] == ['P1']
+
+
+def test_corridor_no_axis_realigns_instead_of_lidar_reverse():
+    # N14 정렬이 실패해 축이 없음 -> 라이다 후진으로 통로에 들어가지 않고 정렬 한 번 더 -> 통로 docking
+    r, d = corr_make()
+    fails = {'n': 1}
+    orig = r.precision
+
+    def prec(req):
+        orig(req)
+        if req['method'] == 'align':
+            r.prec_ok = fails['n'] <= 0      # 첫 정렬만 실패
+            fails['n'] -= 1
+        else:
+            r.prec_ok = True
+    r.precision = prec
+    d.on_move(124, False, FORWARD, wp('N14', yaw=0.0), False, 'P1')
+    d.on_move(124, True, REVERSE, wp('N15', 'N16', 'P2', 'P1'), False, 'P1')
+    run(r, d, 60)
+    assert r.prec[:2] == ['N14:align', 'N14:align'] and r.prec[-1] == 'P1:tape'
+    assert reached(r) == ['N14', 'N15', 'N16', 'P2', 'P1']
+
+
+def test_corridor_replace_to_same_dock_keeps_docking():
+    # 통로 후진 중 같은 도크(D3)로 REPLACE (resend 등) -> 도킹 안 빼고 그대로 (미룬 새 명령은 끝나고 적용, CMD_DONE은 새 cmd)
+    r, d = corr_make()
+    d.on_move(130, False, FORWARD, wp('N14', yaw=0.0), False, 'D3')
+    d.on_move(130, True, REVERSE, wp('N15') + [('D3',) + NODES['D3'] + (3.1416,)], False, 'D3')
+    st = {'done': False}
+
+    def hook(t):
+        if not st['done'] and r.corr and r.corr['final'] is None:
+            st['done'] = True
+            d.on_move(131, False, REVERSE, wp('N15') + [('D3',) + NODES['D3'] + (3.1416,)], False, 'D3')
+    run(r, d, 60, hook=hook)
+    assert r.extends == [] and r.prec == ['N14:align', 'D3:corridor', 'D3:dock_in']
+    assert reached(r) == ['N14', 'N15', 'D3'] and d.queue.cmd_id == 131

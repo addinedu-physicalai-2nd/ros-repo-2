@@ -410,6 +410,9 @@ class Driver:
         self.entrance_req = None      # entrance_approach 요청 (N1에서 D1 도킹을 통째로)
         self.entrance_exit_sent = False   # 입구 도킹 중 '그만하고 교점에서 빠져라'를 보냄
         self.dock_skip_sent = False   # 통로 도킹(D2 · D3) 중 '도크 앞 줄 노드에서 그만'을 보냄 (extend then 없음)
+        self.deferred_moves = []      # N14 정렬 · 통로 도킹 중 온 REPLACE (+ 같은 cmd APPEND): 끝난 자리(줄 노드)에서 적용
+        self.last_step = None         # 마지막으로 도착한 노드 (정렬 다시 할 때)
+        self.realigned = ''           # 축 없이 통로 후진하게 돼서 정렬을 다시 한 노드 (한 번만)
         self.entrance_turn = False    # entrance: D1 쪽으로 돌고 나서 맡김
         self.greet_after_leave = False  # 안내 첫 출발이 도크에서: leave 끝나고 인사
         self._last_pose = (0.0, 0.0, 0.0)
@@ -424,7 +427,13 @@ class Driver:
             if self.in_guide:
                 self.io.guide({'action': 'end', 'node': self.last_node})   # 안내 끝: LED 끄기
             self.in_guide = False     # 안내가 끝났다 (복귀 · 서빙)
+        if self.deferred_moves and append and cmd_id == self.deferred_moves[-1][0]:
+            self.deferred_moves.append((cmd_id, True, drive, waypoints, guide, goal))   # 미뤄 둔 REPLACE 뒤에 붙음
+            return
+        if not append and self._defer_replace((cmd_id, False, drive, waypoints, guide, goal)):
+            return
         if not append:  # REPLACE: 지금 가던 것까지 버리고 새로
+            self.deferred_moves = []
             self._pocket_to_leave('새 명령')
             if self.loc is not None:
                 self._localize_end('replaced')
@@ -480,6 +489,7 @@ class Driver:
             self.error = False
             self._resume()
         elif cmd == CANCEL:
+            self.deferred_moves = []
             self._pocket_to_leave('취소')
             self._stop_motion()
             self.in_guide = False
@@ -518,6 +528,8 @@ class Driver:
         if self.prec_state == 'running' and (self.stops.get(node, {}) or {}).get('leave'):
             self.pocket = node
             self.io.log(f'{node}: 칸 안 (끊기면 빠지기부터)')
+            if self.deferred_moves:
+                self._apply_deferred()          # 통로 중 온 REPLACE를 미뤘는데 이미 칸 안 -> 새 길로, 끊고 빠지기부터
             if (self.entrance_exit_sent or self.dock_skip_sent) and len(self.queue):
                 self.dock_skip_sent = False
                 self._cut_docking_on_append()   # '빠지기 · 그만'이 늦어 이미 칸 안: 끊고 빠지기부터 (APPEND와 같음)
@@ -562,6 +574,7 @@ class Driver:
         self.cur = self.handover[0]
 
     def _pass_step(self, st):
+        self.last_step = st
         self.io.event(NODE_REACHED, st.cmd_id, st.node_id, '')
         self.last_node = st.node_id
         self.last_drive = st.drive
@@ -665,6 +678,8 @@ class Driver:
                         self.axis = pose[2]             # 정렬한 방향 = 이어지는 후진의 축 (출발 회전 생략)
                         self.axis_odom = self._odom_yaw()
                         self.skip_turn = True
+                    if self.deferred_moves:
+                        self._apply_deferred()
                     self._after_node(pose)
                 else:
                     self._done()
@@ -735,7 +750,9 @@ class Driver:
                 for st in steps[:idx]:            # progress가 안 온 지나온 노드
                     self._pass_step(st)
                 self.cur = steps[idx]
-                if steps[idx + 1:]:               # 이어 붙인 게 늦어 docking이 먼저 섬 -> 큐로 돌려 여기서 다시
+                if self.deferred_moves:           # 통로 중 온 REPLACE: 남은 옛 길은 버리고 이 자리(줄 노드)에서 새 길로
+                    self._apply_deferred(names[:idx + 1])
+                elif steps[idx + 1:]:             # 이어 붙인 게 늦어 docking이 먼저 섬 -> 큐로 돌려 여기서 다시
                     self.io.log(f'통로: {reached}에서 섬, {names[idx + 1:]}는 다시 넘겨받기')
                     self.queue.steps[0:0] = steps[idx + 1:]
                 then_done = self.prec_info.get('then_done', bool(req.get('then')) and idx == len(steps) - 1)
@@ -820,6 +837,8 @@ class Driver:
             return
         if self._dock_turnback(pose):
             return
+        if self._realign_before_corridor(pose):
+            return
         stop = self.stops.get(self.cur.node_id, {})
         if (stop.get('method') == 'entrance' and self._precise_here(self.cur)
                 and self.last_node == stop.get('from', self.last_node)):
@@ -842,6 +861,26 @@ class Driver:
             return
         self._begin_move(pose)
 
+    def _realign_before_corridor(self, pose):
+        """정렬 노드(N14, hold_axis)에서 후진으로 통로에 들어가야 하는데 축이 없음 (정렬이 끊김 · 실패):
+        라이다 후진으로 들어가면 좁은 통로 벽에 막힘 -> 그 자리 정렬을 한 번 더 하고 통로 docking으로"""
+        here = self.stops.get(self.last_node, {})
+        if (self.cur.drive != REVERSE or self.axis is not None or not self.corridor
+                or here.get('method') != 'align' or not here.get('hold_axis')
+                or self.last_step is None or self.last_step.node_id != self.last_node
+                or self.realigned == self.last_node):
+            return False
+        self.realigned = self.last_node
+        self.io.log(f'{self.last_node}: 정렬 없이 통로 후진은 안 함 -> 정렬 다시')
+        self.queue.steps.insert(0, self.cur)
+        self.cur = self.last_step
+        self.io.cmd_vel(0.0, 0.0)
+        self.io.nav_cancel()
+        self.phase = 'align'
+        self.io.direction('STOP')
+        self._request_precision(True)
+        return True
+
     def _dock_turnback(self, pose):
         """도크(D1 · D2 · D3)로 들어갈 차례인데 바로 다음이 지금 노드로 되돌아오는 길 (복귀 중 새 안내 · 서빙이 붙음):
         도크에 안 들어가고 지나간 것으로 친 뒤 이어 감 (도킹했다 빠지기 안 함)
@@ -855,9 +894,11 @@ class Driver:
         self.entrance_turn = False
         self.entrance_req = None
         self.io.cmd_vel(0.0, 0.0)
+        drive_before, xy_before = self.last_drive, self.prev_xy
         self._pass_step(self.cur)
         if method == 'dock_in' and len(self.queue) > 1 and not self._at_goal(self.queue.steps[0]):
             self._pass_step(self.queue.steps.pop(0))   # 줄 노드(N16)에 이미 서 있음
+        self.last_drive, self.prev_xy = drive_before, xy_before   # 실제로는 안 움직임: 방향 · 직전 위치는 그대로 (돌지 않게)
         self._after_node(pose)
         return True
 
@@ -949,6 +990,9 @@ class Driver:
 
     def _reached(self, pose):
         step = self.cur
+        self.last_step = step
+        if self.realigned != step.node_id:
+            self.realigned = ''
         self.quiet_obstacle = False
         self.last_node = step.node_id
         self.last_drive = step.drive
@@ -1247,6 +1291,9 @@ class Driver:
         progress로 이미 보낸 노드까지만 지난 것 (result.reached가 그보다 앞이면 그 앞 노드까지 보냄)
         남은 노드는 handover에 그대로 두고 CMD_FAILED reason="corridor_failed:<맡긴 끝 노드>:<이유>"
         -> 서버는 고장 처리 (lock 유지, 직원 확인 후 재개). 재개(RESUME)하면 _resume이 남은 노드로 다시 맡김"""
+        if self.deferred_moves:
+            self.io.log('통로 docking 실패: 미뤄 둔 새 명령은 버림 (재개 · 서버가 다시 보냄)')
+            self.deferred_moves = []
         names = [s_.node_id for s_ in self.handover]
         reached = self.prec_info.get('reached')
         if reached in names[:-1]:
@@ -1264,21 +1311,60 @@ class Driver:
         self.io.event(CMD_FAILED, self.queue.cmd_id, self.last_node, reason)
         self.error = True             # phase · handover · handover_req 유지 (RESUME이면 이어서)
 
+    def _drop_dock_then(self):
+        """도는 통로 docking의 '이어서 도킹(dock_in)'을 빼서 도크 앞 줄 노드(N16 · N15)에서 서게 함. 뺐으면 True"""
+        then0 = (self.handover_req or {}).get('then') or {}
+        if then0.get('method') != 'dock_in' or self.pocket or self.dock_skip_sent or len(self.handover) < 2:
+            return False
+        self.dock_skip_sent = True
+        nodes = list(self.handover_req['nodes'])[:-1]
+        self.handover_req.update(node=nodes[-1] if nodes else self.handover_req['node'], nodes=nodes, then=None)
+        f = getattr(self.io, 'precision_extend', None)
+        if f:
+            f({'nodes': nodes, 'then': None})
+        self.io.log(f'{self.handover[-1].node_id} 도킹 중 새 길 -> 칸 들어가기 전이면 {self.handover[-2].node_id}에서 그만')
+        return True
+
+    def _defer_replace(self, mv):
+        """주방 통로(일방통행) 쪽 REPLACE: N14 정렬 중이거나 통로 docking(칸 들어가기 전) 중이면 끊지 않고 미룸.
+        어차피 앞으로만 가는 길이라 줄 노드(N15 · N16)까지 가서 그 자리에서 새 길로 (도킹은 거기서 할지 정함).
+        끊으면 축(정렬)이 없어 라이다 후진으로 바뀌고 좁은 통로 벽을 장애물로 봐 막힘(STATIC)이 됨"""
+        if self.prec_state not in ('running', 'ok') or self.pocket or self.cur is None:
+            return False                    # ok = 결과는 왔는데 아직 tick이 처리 전 (처리하면서 적용)
+        if self.phase == 'align':
+            if not self.stops.get(self.cur.node_id, {}).get('hold_axis'):
+                return False
+            where = f'{self.cur.node_id} 정렬'
+        elif self.phase == 'corridor_approach' and self.handover_req:
+            then0 = self.handover_req.get('then') or {}
+            if then0.get('method') != 'dock_in' and not self.dock_skip_sent:
+                return False                # P1로 가는 통로: 예전대로
+            dock = self.handover[-1].node_id if self.handover else ''
+            if not (mv[5] == dock and any(w[0] == dock for w in mv[3])):
+                self._drop_dock_then()      # 새 길이 이 도크로 가는 게 아니면 줄 노드에서 그만 (가는 거면 그대로 도킹)
+            where = '통로 docking'
+        else:
+            return False
+        self.deferred_moves = [mv]
+        self.io.log(f'새 명령({mv[0]}) -> {where} 중이라 끊지 않고 끝난 자리에서 새 길로')
+        return True
+
+    def _apply_deferred(self, passed=()):
+        """미뤄 둔 REPLACE를 지금 자리(정렬 · 통로 끝)에서 적용. 이미 지나온 · 선 노드(passed, last_node)는 앞에서 뺌"""
+        moves, self.deferred_moves = self.deferred_moves, []
+        for i, (cmd_id, _append, drive, waypoints, guide, goal) in enumerate(moves):
+            self.queue.apply(cmd_id, i > 0, drive, waypoints, guide, goal)
+        done = set(passed) | {self.last_node}
+        while len(self.queue) and self.queue.steps[0].node_id in done:
+            self.queue.steps.pop(0)
+        self.io.log(f'미뤄 둔 새 명령({self.queue.cmd_id}) 적용: {[s_.node_id for s_ in self.queue.steps]}')
+
     def _corridor_extend(self):
         """통로 후진 중 APPEND: 이어지는 REVERSE 노드를 달리는 docking에 붙임 (then이 이미 있으면 안 붙임)
         단 then이 도크(dock_in)인데 새 길이 그 도크 앞 줄 노드(N16 · N15)로 되돌아옴 (복귀 중 새 일):
         도크에 안 들어가게 then을 빼고 줄 노드에서 멈추게 함 -> 남은 D2는 큐로 돌아와 건너뜀(_dock_turnback)"""
-        then0 = self.handover_req.get('then') or {}
-        if (then0.get('method') == 'dock_in' and not self.pocket and not self.dock_skip_sent
-                and len(self.handover) >= 2 and len(self.queue)
-                and self.queue.steps[0].node_id == self.handover[-2].node_id):
-            self.dock_skip_sent = True
-            nodes = list(self.handover_req['nodes'])[:-1]
-            self.handover_req.update(node=nodes[-1] if nodes else self.handover_req['node'], nodes=nodes, then=None)
-            f = getattr(self.io, 'precision_extend', None)
-            if f:
-                f({'nodes': nodes, 'then': None})
-            self.io.log(f'{self.handover[-1].node_id} 도킹 중 새 길 -> 칸 들어가기 전이면 {self.handover[-2].node_id}에서 그만')
+        if (len(self.queue) and len(self.handover) >= 2
+                and self.queue.steps[0].node_id == self.handover[-2].node_id and self._drop_dock_then()):
             return
         if self.handover_req.get('then'):
             return
