@@ -1,0 +1,4 @@
+newmtl counter_front
+Ka 1 1 1
+Kd 1 1 1
+map_Kd counter_front.png

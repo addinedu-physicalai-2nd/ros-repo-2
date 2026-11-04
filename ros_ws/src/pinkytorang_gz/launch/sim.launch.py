@@ -9,6 +9,7 @@
   ros2 launch pinkytorang_gz sim.launch.py nav:=true               # + 로봇별 Nav2(map v5, nav_v5_sim) + 초기 위치
   ros2 launch pinkytorang_gz sim.launch.py gui:=false              # 서버만 (헤드리스)
   ros2 launch pinkytorang_gz sim.launch.py agent:=true             # + 로봇별 fleet_agent (관제 서버와 연결)
+  ros2 launch pinkytorang_gz sim.launch.py twin:=true              # 실물 세트 world (오픈 키친 · 인쇄물 · 테이프 · 마커 자리)
 """
 import math
 import os
@@ -156,6 +157,8 @@ def generate_launch_description():
 
     def gz(ctx):
         world = LaunchConfiguration('world').perform(ctx)
+        if _truthy(LaunchConfiguration('twin').perform(ctx)) and world == world_default:
+            world = os.path.join(share, 'worlds', 'pinkytorang_twin.sdf')
         gui = _truthy(LaunchConfiguration('gui').perform(ctx))
         args = f'-r -v 3 {world}' if gui else f'-r -s -v 3 {world}'
         return [IncludeLaunchDescription(
@@ -165,6 +168,8 @@ def generate_launch_description():
 
     return LaunchDescription([
         DeclareLaunchArgument('world', default_value=world_default),
+        DeclareLaunchArgument('twin', default_value='false',
+                              description='true = worlds/pinkytorang_twin.sdf (tools/gen_twin.py, 실물 세트)'),
         DeclareLaunchArgument('robots_file', default_value=os.path.join(share, 'config', 'robots.yaml')),
         DeclareLaunchArgument('only', default_value='', description='쉼표로 로봇 id (빈칸 = 전부)'),
         DeclareLaunchArgument('gui', default_value='true'),

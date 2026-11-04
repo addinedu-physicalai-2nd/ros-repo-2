@@ -106,6 +106,21 @@ ROS_DOMAIN_ID=51 ros2 run teleop_twist_keyboard teleop_twist_keyboard
 - `tray_top` 프레임 = 물건 놓는 자리
 - 끄기: `with_tray:=false`
 
+## 실물 세트 world (`twin:=true`)
+
+```bash
+ros2 launch pinkytorang_gz sim.launch.py twin:=true                 # 나머지 인자(only · nav · agent ...)는 그대로
+python3 tools/gen_twin.py                                           # 고친 뒤 다시 생성 -> worlds/pinkytorang_twin.sdf · twin_meshes/
+```
+
+PGM 벽 대신 실제 세트 치수로 세운 world. 좌표 · 스폰 · 테이블 자리는 위와 같다.
+
+- 벽 30 cm. N13~N14 통로 위는 칸막이(x 0.40)를 북쪽 벽까지 이은 윗부분만 (바닥에서 17 cm 비움, 로봇은 밑으로)
+- P1 오픈 키친: 픽업 상자 바닥 슬롯(높이 5 · 깊이 6 cm)에 트레이가 들어감 + 카운터 65 × 19 + 안쪽 주방
+- 인쇄물 텍스처 `tools/twin_tex/`: KITCHEN 띠 · OPEN KITCHEN 카운터 · 메뉴판 · 충전 도크 D1~D3 · E자 테두리 종이
+- 바닥 테이프 E자 · N15 · N16 가로선 (검정), 마커 1~6 자리 (색 판, 아직 ArUco 무늬 아님)
+- 테이블 T1~T6 + D1 옆 키오스크 테이블(K) = `model://pinky_table`
+
 ## 맵이나 노드를 바꿨을 때
 
 ```bash

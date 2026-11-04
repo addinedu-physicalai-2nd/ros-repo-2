@@ -1,0 +1,4 @@
+newmtl kitchen_sign
+Ka 1 1 1
+Kd 1 1 1
+map_Kd kitchen_sign.png

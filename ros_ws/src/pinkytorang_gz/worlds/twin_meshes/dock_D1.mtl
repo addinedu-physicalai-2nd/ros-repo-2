@@ -1,0 +1,4 @@
+newmtl dock_D1
+Ka 1 1 1
+Kd 1 1 1
+map_Kd dock_D1.png

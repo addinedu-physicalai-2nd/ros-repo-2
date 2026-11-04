@@ -1,0 +1,4 @@
+newmtl kitchen_floor
+Ka 1 1 1
+Kd 1 1 1
+map_Kd kitchen_floor.png
