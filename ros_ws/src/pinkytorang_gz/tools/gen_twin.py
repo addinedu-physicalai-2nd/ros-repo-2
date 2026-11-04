@@ -4,8 +4,9 @@
   - 벽 30 cm · N13~N14 통로 위 칸막이 (아래 17 cm 비움, 로봇은 밑으로 지나감)
   - P1 오픈 키친: 픽업 상자(바닥 슬롯 5 x 6 cm, 트레이가 들어감) + 카운터 65 x 19 + 안쪽 주방 (냉장고 · 싱크 · 화구 · 후드 · 팬트리)
   - 인쇄물 텍스처 (tools/twin_tex): KITCHEN 띠 · OPEN KITCHEN 카운터 · 메뉴판 · 충전 도크 D1~D3 · E자 테두리 종이
-  - 바닥 테이프 (E자, N15 · N16 가로선), ArUco 자리 (색 판, 마커 1~6)
-  - 테이블 T1~T6 + D1 옆 키오스크 테이블 = model://pinky_table (gen_world.py와 같은 자리)
+  - 바닥 테이프 (E자, N15 · N16 가로선), 손님 대기선 (D1 통로 입구, 노랑), AprilTag 마커 1~6 · 테이블 다리 11~62 (실제 인쇄물)
+  - D1 옆 키오스크 테이블 + 키오스크 화면 (동쪽을 봄)
+  - 테이블 T1~T6 + D1 옆 키오스크 테이블 = model://pinky_table (gen_world.py와 같은 자리), 상판에 주문 QR 카드
 
   python3 tools/gen_twin.py                       # -> worlds/pinkytorang_twin.sdf + worlds/twin_meshes/
   python3 tools/gen_twin.py --json /tmp/twin.json # (미리보기용 장면 데이터도)
@@ -73,13 +74,38 @@ for n, y in (('dock_div_s', -0.094), ('dock_div_m', 0.052), ('dock_div_n', 0.198
 #   (node_graph T 좌표 = 통로 쪽 짧은 변 가운데 -> -y로 165 mm). K = D1 옆 키오스크 테이블 (맵 v5 속 빈 사각형 자리)
 TL, TW, TH = 0.165, 0.110, 0.150
 T = {n['table']: (n['x'], n['y'] - TL / 2) for n in GRAPH['nodes'] if n.get('table')}
-T['K'] = (1.765, 0.605)
-for k, (x, y) in T.items():     # 미리보기용 상자 (SDF에는 tbl_ 대신 pinky_table include)
-    box(f'tbl_{k}_top', 'table', x - TW / 2, x + TW / 2, y - TL / 2, y + TL / 2, TH - 0.01, TH)
-    box(f'tbl_{k}_apron', 'table', x - TW / 2 + 0.005, x + TW / 2 - 0.005, y - TL / 2 + 0.005, y + TL / 2 - 0.005, 0.10, TH - 0.01)
-    for dx in (-0.045, 0.045):
-        for dy in (-0.07, 0.07):
-            box(f'tbl_{k}_leg', 'leg', x + dx - 0.0075, x + dx + 0.0075, y + dy - 0.0075, y + dy + 0.0075, 0, 0.10)
+T['K'] = (1.68 + TW / 2 + 0.003, Y1 - WALL_T / 2 - TL / 2 - 0.003)   # D1 통로 북서 모서리
+for k, (x, y) in T.items():     # 미리보기용 상자 (SDF에는 tbl_ 대신 pinky_table include). 치수 = table1.stl
+    box(f'tbl_{k}_top', 'table', x - TW / 2, x + TW / 2, y - TL / 2, y + TL / 2, TH - 0.002, TH)
+    box(f'tbl_{k}_apron', 'table', x - 0.045, x + 0.045, y - 0.0725, y + 0.0725, 0.10, TH - 0.002)
+    for dx in (-0.038, 0.038):
+        for dy in (-0.0655, 0.0655):
+            box(f'tbl_{k}_leg', 'leg', x + dx - 0.011, x + dx + 0.011, y + dy - 0.011, y + dy + 0.011, 0, 0.10)
+
+# 테이블 위 QR 카드 (table_qr_T1-T6_A4.pdf, 165 x 110 = 상판 그대로). 긴 변 = map y, 동쪽에서 읽힘
+# 다리 마커: 통로 쪽(+y) 다리 두 개의 바깥면. 왼쪽(+1) = 동쪽 다리, 오른쪽(+2) = 서쪽 다리 (통로에서 테이블을 봤을 때)
+for k, (x, y) in T.items():
+    if k == 'K':
+        continue
+    quads.append((f'qr_{k}', f'qr_{k}', x, y, TH + 0.0004, TL, TW, 'up', math.pi / 2))
+    num = int(k[1:]) * 10
+    leg_face = y + 0.0765 + 0.0006
+    quads.append((f'tag_{num + 1}', f'tag_{num + 1}', x + 0.038, leg_face, 0.065, 0.025 * 1.25, 0.025 * 1.25, '+y', 0))
+    quads.append((f'tag_{num + 2}', f'tag_{num + 2}', x - 0.038, leg_face, 0.065, 0.025 * 1.25, 0.025 * 1.25, '+y', 0))
+
+# 키오스크 (K 테이블 위): 받침 + 기둥 + 화면. 화면은 동쪽(통로 쪽)을 봄 -> 키오스크 기준 오른쪽(남쪽) = 손님 들어오는 쪽
+KXc, KYc = T['K']
+box('kiosk_base', 'dark', KXc - 0.03, KXc + 0.01, KYc - 0.02, KYc + 0.02, TH, TH + 0.006)
+box('kiosk_pole', 'steel_d', KXc - 0.014, KXc - 0.006, KYc - 0.004, KYc + 0.004, TH + 0.006, TH + 0.05)
+box('kiosk_body', 'dark', KXc - 0.006, KXc + 0.004, KYc - 0.034, KYc + 0.034, TH + 0.04, TH + 0.14)
+quads.append(('kiosk_screen', 'kiosk_screen', KXc + 0.0046, KYc, TH + 0.09, 0.062, 0.093, '+x', 0))
+
+# 손님 대기 구역: D1 통로가 끊기는 곳(입구 벽 남쪽 끝 y -0.43)을 가로지르는 노란 선 + 바닥 안내
+#   N1(y -0.82)에서 기다리던 안내 로봇이 북쪽(선 너머 대기 손님)을 보고 사람을 인식하면 출발
+WAIT_Y = -0.43
+C['wait'] = '#f2c230'
+box('wait_line', 'wait', 1.68, X1 - WALL_T / 2, WAIT_Y - 0.0095, WAIT_Y + 0.0095, 0.0004, 0.0014, False)
+quads.append(('wait_sign', 'wait_sign', (1.68 + X1 - WALL_T / 2) / 2, WAIT_Y + 0.045, 0.0006, 0.215, 0.05, 'up', 0))
 
 # ================================================================ 오픈 키친 (P1)
 # 실물 앞면: [픽업 상자: 바닥 검은 슬롯(높이 5, 깊이 6) + KITCHEN 띠] + [긴 카운터 65 x 19 (OPEN KITCHEN 인쇄)]
@@ -106,30 +132,23 @@ box('pickup_cheek_n', 'counter', -0.01, KX, SY1 - 0.015, SY1, 0.01, 0.06)
 box('pickup_body', 'counter', -0.01, KX, SY0, SY1, 0.06, H)
 quads.append(('kitchen_sign', 'kitchen_sign', KX + 0.0006, (SY0 + SY1) / 2, 0.10, 0.25, 0.06, '+x', 0))
 box('counter_panel', 'counter', FB, KX, SY1, -0.13, 0, H)
+# 카운터 끝 ~ D2 남쪽 칸막이(dock_div_s) 사이 틈 막기: 같은 판으로 이어서 주방이 칸막이까지 막힘
+KJ = -0.094 - WALL_T / 2
+box('counter_join', 'counter', FB, KX, -0.13, KJ, 0, H)
 quads.append(('counter_front', 'counter', KX + 0.0006, (SY1 - 0.13) / 2, H / 2, 0.65, 0.19, '+x', 0))
-box('pass_shelf', 'marble', 0.0, KX + 0.008, SY1, -0.13, H, H + 0.006)          # 배식대 상판 (앞으로 살짝 나옴)
+box('pass_shelf', 'marble', 0.035, KX + 0.008, SY1, KJ, H, H + 0.006)        # 배식대 상판 (판 위 좁은 턱)
 box('pickup_top', 'marble', -0.01, KX + 0.008, SY0, SY1, H, H + 0.006)
+cyls.append(('bell_base', 'steel_d', 0.03, SY1 - 0.04, H + 0.008, 0.009, 0.004))
+cyls.append(('bell', 'jar_y', 0.03, SY1 - 0.04, H + 0.014, 0.007, 0.01))
 for y in (-0.62, -0.50, -0.38):
-    cyls.append(('bowl', 'bowl', 0.03, y, H + 0.018, 0.022, 0.024))
-    cyls.append(('berry', 'berry', 0.03, y, H + 0.036, 0.013, 0.02))
+    cyls.append(('bowl', 'bowl', 0.056, y, H + 0.012, 0.016, 0.012))
+    cyls.append(('berry', 'berry', 0.056, y, H + 0.020, 0.010, 0.008))
 # 배식대 안쪽 선반 (접시 · 쟁반)
 box('pass_under', 'steel', 0.005, FB, SY1, -0.13, 0.10, 0.104)
 for y in (-0.72, -0.66):
     for k in range(5):
         cyls.append(('plate_stack', 'bowl', 0.03, y, 0.106 + k * 0.004, 0.02, 0.003))
 box('tray_stack', 'steel_d', 0.012, 0.05, -0.30, -0.20, 0.104, 0.112)
-# 패스 조명 갠트리 + 주문표 레일
-for y in (SY1 + 0.01, -0.145):
-    box('gantry_post', 'steel_d', 0.024, 0.032, y - 0.004, y + 0.004, H + 0.006, 0.30)
-box('gantry_bar', 'steel_d', 0.022, 0.034, SY1 + 0.01, -0.145, 0.292, 0.30)
-for y in (-0.68, -0.44, -0.24):
-    box('lamp_cord', 'grate', 0.0275, 0.0285, y - 0.0005, y + 0.0005, 0.276, 0.292, False)
-    cyls.append(('lamp_shade', 'lamp', 0.028, y, 0.27, 0.011, 0.012))
-    cyls.append(('lamp_bulb', 'bulb', 0.028, y, 0.263, 0.006, 0.003))
-box('ticket_rail', 'steel', 0.03, 0.034, -0.75, -0.42, 0.285, 0.29, False)
-for i, y in enumerate((-0.72, -0.66, -0.61, -0.55, -0.49)):
-    box('ticket', 'paper', 0.0335, 0.0345, y - 0.009, y + 0.009, 0.258 - (i % 2) * 0.004, 0.286, False)
-
 # --- 주방 바닥 (타일)
 quads.append(('kitchen_floor', 'tile_floor', (KW + FB) / 2, (KS + KN) / 2, 0.0003, FB - KW, KN - KS, 'up', 0))
 
@@ -139,6 +158,8 @@ def base_cab(n, y0, y1, top='marble'):
     box(n + '_cab', 'cabinet', KW, CB, y0, y1, 0.004, CH - 0.004)
     box(n + '_kick', 'grate', KW, CB - 0.006, y0, y1, 0, 0.004)
     box(n + '_top', top, KW, CB + 0.004, y0, y1, CH - 0.004, CH)
+    if top == 'marble':
+        quads.append((n + '_marble', 'marble', (KW + CB + 0.004) / 2, (y0 + y1) / 2, CH + 0.0004, CB + 0.004 - KW, y1 - y0, 'up', 0))
     w = y1 - y0
     k = max(1, round(w / 0.07))
     for i in range(k):                                         # 문짝 홈 + 손잡이
@@ -165,9 +186,9 @@ for y in (-0.877, -0.866, -0.856):
     cyls.append(('veg', 'green', KW + 0.029, y, CH + 0.024, 0.006, 0.01))
 # 싱크 + 수전 + 식기 건조대
 base_cab('sink', -0.84, -0.68, top='steel')
-box('sink_basin', 'steel_d', KW + 0.012, CB - 0.01, -0.82, -0.735, CH - 0.0035, CH + 0.0005, False)
-cyls.append(('faucet', 'handle', KW + 0.008, -0.777, CH + 0.02, 0.003, 0.04))
-box('faucet_spout', 'handle', KW + 0.008, KW + 0.03, -0.779, -0.775, CH + 0.037, CH + 0.04, False)
+quads.append(('sink_top', 'sink', (KW + CB + 0.004) / 2, -0.77, CH + 0.0005, CB + 0.004 - KW, 0.14, 'up', 0))
+cyls.append(('faucet', 'handle', KW + 0.006, -0.79, CH + 0.02, 0.003, 0.04))
+box('faucet_spout', 'handle', KW + 0.006, KW + 0.026, -0.792, -0.788, CH + 0.037, CH + 0.04, False)
 box('rack', 'steel', KW + 0.01, KW + 0.06, -0.725, -0.69, CH, CH + 0.003)
 for i in range(5):
     y = -0.72 + i * 0.006
@@ -176,24 +197,18 @@ for i in range(5):
 RY0, RY1 = -0.68, -0.46
 box('range', 'steel', KW, CB + 0.003, RY0, RY1, 0, CH + 0.002)
 box('range_top', 'grate', KW, CB + 0.003, RY0, RY1, CH + 0.002, CH + 0.004)
+quads.append(('cooktop', 'cooktop', (KW + CB + 0.003) / 2, (RY0 + RY1) / 2, CH + 0.0045, CB + 0.003 - KW, RY1 - RY0, 'up', 0))
 box('oven_door', 'glass', CB + 0.003, CB + 0.005, RY0 + 0.02, RY1 - 0.02, 0.012, 0.062, False)
 box('oven_handle', 'handle', CB + 0.005, CB + 0.009, RY0 + 0.03, RY1 - 0.03, 0.066, 0.069, False)
 for i in range(5):
     y = RY0 + 0.03 + i * (RY1 - RY0 - 0.06) / 4
     box('knob', 'grate', CB + 0.003, CB + 0.008, y - 0.004, y + 0.004, 0.074, 0.082, False)
-for bx in (KW + 0.02, KW + 0.05):
-    for by in (RY0 + 0.05, RY1 - 0.05):
-        cyls.append(('burner_ring', 'steel_d', bx, by, CH + 0.0045, 0.014, 0.001))
-        cyls.append(('burner_cap', 'grate', bx, by, CH + 0.0055, 0.006, 0.0015))
-cyls.append(('pot', 'pot', KW + 0.02, RY1 - 0.05, CH + 0.022, 0.016, 0.032))
-cyls.append(('pot_lid', 'steel', KW + 0.02, RY1 - 0.05, CH + 0.039, 0.017, 0.002))
-cyls.append(('pot_knob', 'grate', KW + 0.02, RY1 - 0.05, CH + 0.042, 0.003, 0.004))
+cyls.append(('pot', 'pot', KW + 0.022, RY1 - 0.055, CH + 0.022, 0.016, 0.032))
+cyls.append(('pot_lid', 'steel', KW + 0.022, RY1 - 0.055, CH + 0.039, 0.017, 0.002))
+cyls.append(('pot_knob', 'grate', KW + 0.022, RY1 - 0.055, CH + 0.042, 0.003, 0.004))
 cyls.append(('pan', 'grate', KW + 0.05, RY0 + 0.05, CH + 0.009, 0.017, 0.006))
 box('pan_handle', 'grate', KW + 0.05 + 0.016, KW + 0.05 + 0.045, RY0 + 0.048, RY0 + 0.052, CH + 0.009, CH + 0.012, False)
 cyls.append(('pan_egg', 'paper', KW + 0.05, RY0 + 0.05, CH + 0.0125, 0.008, 0.001))
-box('hood', 'steel', KW, KW + 0.075, RY0 + 0.005, RY1 - 0.005, 0.195, 0.215)
-box('hood_lip', 'steel_d', KW, KW + 0.075, RY0 + 0.005, RY1 - 0.005, 0.192, 0.195, False)
-box('hood_duct', 'steel', KW, KW + 0.03, (RY0 + RY1) / 2 - 0.035, (RY0 + RY1) / 2 + 0.035, 0.215, WALL_H)
 # 조리대 2: 볼 · 양념통
 base_cab('prep2', RY1, -0.31)
 cyls.append(('mix_bowl', 'steel', KW + 0.035, -0.42, CH + 0.009, 0.016, 0.018))
@@ -221,15 +236,6 @@ for y in (PY0 + 0.03, PY0 + 0.09):
 
 # 벽: 타일 백스플래시 + 선반 + 걸이 레일
 quads.append(('backsplash', 'tile_wall', KW + 0.0006, (FY1 + PY0) / 2, (CH + 0.26) / 2, PY0 - FY1, 0.26 - CH, '+x', 0))
-box('wall_shelf', 'wood', KW, KW + 0.03, FY1 + 0.01, -0.70, 0.17, 0.175)
-for i, col in enumerate(('jar_r', 'jar_y', 'jar_g', 'jar_y', 'jar_r', 'jar_g')):
-    cyls.append(('shelf_jar', col, KW + 0.015, FY1 + 0.03 + i * 0.04, 0.175 + 0.008, 0.005, 0.016))
-box('utensil_rail', 'steel', KW, KW + 0.006, RY1 + 0.01, -0.33, 0.20, 0.204, False)
-for i, (dz, col) in enumerate(((0.05, 'steel_d'), (0.04, 'grate'), (0.055, 'steel'), (0.045, 'wood'))):
-    y = RY1 + 0.03 + i * 0.03
-    box('utensil', col, KW + 0.003, KW + 0.006, y - 0.002, y + 0.002, 0.20 - dz, 0.20, False)
-    box('utensil_head', col, KW + 0.003, KW + 0.008, y - 0.007, y + 0.007, 0.20 - dz - 0.012, 0.20 - dz, False)
-
 # 쓰레기통 (주방 통로 북쪽 끝)
 cyls.append(('bin', 'bin', 0.02, -0.19, 0.035, 0.022, 0.07))
 cyls.append(('bin_lid', 'grate', 0.02, -0.19, 0.072, 0.023, 0.004))
@@ -255,13 +261,11 @@ quads.append(('dock_D2', 'dock_D2', X0 + WALL_T / 2 + 0.0006, -0.021, 0.045, 0.1
 quads.append(('dock_D3', 'dock_D3', X0 + WALL_T / 2 + 0.0006, 0.125, 0.045, 0.14, 0.079, '+x', 0))
 quads.append(('dock_D1', 'dock_D1', 1.67 + WALL_T / 2 + 0.0006, 0.386, 0.05, 0.16, 0.09, '+x', 0))
 
-# 마커 (중심 높이 6.5): 지금은 색 판, 다음 단계에서 ArUco 텍스처
-def marker(n, size, x, y, face):
-    t = 0.002
-    if face in ('+x', '-x'):
-        box(n, 'marker', x - t / 2, x + t / 2, y - size / 2, y + size / 2, 0.065 - size / 2, 0.065 + size / 2, False)
-    else:
-        box(n, 'marker', x - size / 2, x + size / 2, y - t / 2, y + t / 2, 0.065 - size / 2, 0.065 + size / 2, False)
+# 마커 = 실제 인쇄물 (pinkytorang_markers.pdf, AprilTag 36h11). 검은 사각형 한 변 = size, 흰 테두리 1칸 포함 1.25배
+#   중심 높이 6.5 cm. 텍스처 tools/twin_tex/tag_<id>.png (PDF에서 잘라 OpenCV로 ID 확인)
+def marker(n, size, x, y, face, z=0.065):
+    tid = n[1:]
+    quads.append((f'tag_{tid}', f'tag_{tid}', x, y, z, size * 1.25, size * 1.25, face, 0))
 
 
 marker('m1', 0.025, X1 - 0.011, 0.386, '-x')

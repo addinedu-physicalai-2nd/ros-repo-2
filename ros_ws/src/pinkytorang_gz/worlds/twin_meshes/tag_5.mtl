@@ -1,0 +1,4 @@
+newmtl tag_5
+Ka 1 1 1
+Kd 1 1 1
+map_Kd tag_5.png

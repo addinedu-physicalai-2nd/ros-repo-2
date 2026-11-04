@@ -1,0 +1,4 @@
+newmtl prep1_marble
+Ka 1 1 1
+Kd 1 1 1
+map_Kd prep1_marble.png

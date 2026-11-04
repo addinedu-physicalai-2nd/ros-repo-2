@@ -1,0 +1,4 @@
+newmtl qr_T2
+Ka 1 1 1
+Kd 1 1 1
+map_Kd qr_T2.png

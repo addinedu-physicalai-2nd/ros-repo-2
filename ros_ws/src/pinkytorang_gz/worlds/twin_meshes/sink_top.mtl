@@ -1,0 +1,4 @@
+newmtl sink_top
+Ka 1 1 1
+Kd 1 1 1
+map_Kd sink_top.png
