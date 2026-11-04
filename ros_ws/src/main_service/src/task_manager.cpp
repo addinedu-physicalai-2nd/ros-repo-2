@@ -272,6 +272,10 @@ void TaskManager::onRobotState(const std::string& id, double x, double y, double
     r->seen = true;
     r->online = true;
     logLine("TASK", id + " 첫 상태 수신");
+    if (!any_state_) {
+      any_state_ = true;
+      first_state_at_ = std::chrono::steady_clock::now();
+    }
   }
   r->x = x;
   r->y = y;
@@ -797,6 +801,15 @@ std::string TaskManager::pickDockFor(const std::string& robot_id) const {
 // 쉬는 로봇 자리 맞추기: 입구에 있어야 할 수(entranceStandbyWanted)보다 적으면 픽업 쪽에서 데려오고,
 // 많으면 입구 로봇(앞칸부터)을 픽업 쪽으로 보낸다. 손님이 기다리는데 입구 로봇이 충전 중이면 비켜 준다
 void TaskManager::rebalanceStandby() {
+  // 켤 때: 설정한 로봇이 다 첫 상태를 보낼 때까지(최대 10초) 자리 맞추기 보류.
+  // 안 그러면 먼저 온 로봇(예: D3)을 입구로 보냈다가, 입구(D1) 로봇 상태가 뒤늦게 와서 되돌리게 됨
+  {
+    bool all_seen = true;
+    for (const auto& pair : robots_) all_seen = all_seen && pair.second.seen;
+    if (!all_seen &&
+        (!any_state_ || std::chrono::steady_clock::now() - first_state_at_ < std::chrono::seconds(10)))
+      return;
+  }
   int want = entranceStandbyWanted();
   int have = entranceStandbyCount();
 

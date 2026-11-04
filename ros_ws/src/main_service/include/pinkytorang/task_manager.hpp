@@ -204,6 +204,9 @@ class TaskManager {
   int next_order_id_ = 1;
   std::string pickup_node_;
   bool dirty_ = true;
+  // 켤 때 자리 맞추기 보류: 로봇마다 첫 상태가 따로 와서, 먼저 온 로봇을 입구로 보냈다가 되돌리는 걸 막음
+  bool any_state_ = false;
+  std::chrono::steady_clock::time_point first_state_at_{};
   Clock::time_point last_snapshot_;
 };
 
