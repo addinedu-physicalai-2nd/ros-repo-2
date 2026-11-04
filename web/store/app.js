@@ -122,18 +122,19 @@ function onMessage(msg) {
 // ---------- 장애물 사진 팝업 ----------
 // 로봇 카메라(YOLO)가 멈춰 세운 순간 서버가 보내 줌 (멈춘 동안 몇 초마다 새 사진). 로봇마다 하나 (새로 오면 바꿈)
 // 닫힘: ✕ / 그 로봇이 막힘이 아니게 되고 5초 / 2분 지남
-const SNAP_KEEP_MS = 120000, SNAP_AFTER_CLEAR_MS = 5000;
+const SNAP_KEEP_MS = 120000, SNAP_AFTER_CLEAR_MS = 5000, SNAP_GUEST_MS = 6000;
 function renderSnaps() {
   const list = Object.values(state.snaps).sort((a, b) => a.robot_id.localeCompare(b.robot_id));
   $('snaps').innerHTML = list.map((s) => {
     const t = new Date(s.at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    const kind = (typeof OBST_TEXT !== 'undefined' && OBST_TEXT[s.kind]) || '장애물';
+    const guest = s.kind === 'GUEST';      // 안내 손님을 찾은 화면 (막힘 아님)
+    const kind = guest ? '안내 손님 찾음' : ((typeof OBST_TEXT !== 'undefined' && OBST_TEXT[s.kind]) || '장애물');
     return `
       <div class="snap" style="--rc:${robotColor(s.robot_id)}">
         <div class="snap-head">
           <span class="snap-robot"><span class="dot" style="background:${robotColor(s.robot_id)}"></span>${esc(s.robot_id)}</span>
-          <span class="badge BLOCKED">막힘</span>
-          <span class="snap-node">${esc(s.node || '')} 앞 · ${esc(kind)}</span>
+          ${guest ? '<span class="badge GUEST">손님 확인</span>' : '<span class="badge BLOCKED">막힘</span>'}
+          <span class="snap-node">${esc(s.node || '')}${guest ? '' : ' 앞'} · ${esc(kind)}</span>
           <button class="icon-btn" data-act="snap-close" data-robot="${esc(s.robot_id)}" aria-label="닫기">✕</button>
         </div>
         <img class="snap-img" alt="${esc(s.robot_id)} 카메라" src="/api/robots/${encodeURIComponent(s.robot_id)}/obstacle.jpg?t=${esc(s.ts)}">
@@ -147,7 +148,8 @@ function expireSnaps() {
   Object.values(state.snaps).forEach((s) => {
     const r = state.robots.find((x) => x.id === s.robot_id);
     if (r && r.state !== 'BLOCKED') s.clearAt = s.clearAt || now; else s.clearAt = 0;
-    if (now - s.at > SNAP_KEEP_MS || (s.clearAt && now - s.clearAt > SNAP_AFTER_CLEAR_MS)) {
+    const keep = s.kind === 'GUEST' ? SNAP_GUEST_MS : SNAP_KEEP_MS;       // 손님 확인은 잠깐만
+    if (now - s.at > keep || (s.kind !== 'GUEST' && s.clearAt && now - s.clearAt > SNAP_AFTER_CLEAR_MS)) {
       delete state.snaps[s.robot_id];
       changed = true;
     }

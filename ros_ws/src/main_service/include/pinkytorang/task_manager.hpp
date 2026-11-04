@@ -185,6 +185,7 @@ class TaskManager {
   struct ObstacleSnap {
     std::string jpeg;
     std::string label;      // 예: "toy_person 0.87"
+    bool guest = false;     // 안내 손님을 찾은 사진 (막힘 아님)
     Clock::time_point at;
   };
   std::map<std::string, ObstacleSnap> snaps_;   // 로봇별 마지막 카메라 장애물 사진

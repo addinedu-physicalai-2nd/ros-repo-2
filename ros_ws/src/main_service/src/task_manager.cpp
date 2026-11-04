@@ -354,7 +354,7 @@ void TaskManager::onRobotEvent(const std::string& id, uint8_t type, uint32_t cmd
     }
     // 카메라(YOLO)가 앞을 찍어 뒀으면 팝업을 한 번 더 (멈춘 순간 이미 떴음. 이력에 남기고 막힘 종류로 갱신)
     auto sit = snaps_.find(id);
-    if (client_ && sit != snaps_.end() &&
+    if (client_ && sit != snaps_.end() && !sit->second.guest &&
         std::chrono::duration<double>(Clock::now() - sit->second.at).count() <= cfg_.obstacle_snap_max_age_sec) {
       long long ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                          std::chrono::system_clock::now().time_since_epoch()).count();
@@ -401,7 +401,8 @@ void TaskManager::onObstacleSnap(const std::string& id, std::string jpeg, const 
   if (!findRobot(id) || jpeg.empty()) return;
   ObstacleSnap& s = snaps_[id];
   s.jpeg = std::move(jpeg);
-  s.label = label;
+  s.guest = label.rfind("GUEST|", 0) == 0;   // guide_node: 안내 손님 찾음 (frame_id 앞에 GUEST|)
+  s.label = s.guest ? label.substr(6) : label;
   s.at = Clock::now();
   // 카메라가 멈춰 세운 순간 바로 관제 팝업 (멈춘 동안 몇 초마다 새 사진이 오면 같은 팝업을 새로 그림)
   if (client_) {
@@ -409,7 +410,7 @@ void TaskManager::onObstacleSnap(const std::string& id, std::string jpeg, const 
     if (node.empty()) node = traffic_.currentNode(id);
     long long ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                        std::chrono::system_clock::now().time_since_epoch()).count();
-    client_->pushObstacleSnap(id, node, "PERSON", label, ms);
+    client_->pushObstacleSnap(id, s.guest ? traffic_.currentNode(id) : node, s.guest ? "GUEST" : "PERSON", s.label, ms);
   }
 }
 

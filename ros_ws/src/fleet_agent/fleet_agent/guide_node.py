@@ -75,6 +75,11 @@ class GuideNode(Node):
             turn_release_deg=float(p('cam_turn_release_deg', 60.0).value))   # 본 때보다 이만큼 넘게 돌면 바로 풂
         self.base_frame = p('base_frame', 'base_link').value
         self.spin_w = float(p('cam_spin_w', 0.3).value)              # 직진 거의 0 + 이보다 빠른 회전 = 제자리 회전 (새로 안 멈춤)
+        # 손님을 찾은 뒤(greet · watch OK) 돌아서 출발할 때: 바로 앞 그 손님을 장애물로 보고 멈추지 않게
+        #   로봇이 guest_turn_deg 넘게 돌거나 guest_ignore_sec 지날 때까지 카메라 멈춤을 안 씀
+        self.guest_turn = math.radians(float(p('guest_turn_deg', 90.0).value))
+        self.guest_ignore_sec = float(p('guest_ignore_sec', 5.0).value)
+        self.guest_ignore = None     # (그때 로봇 방향, 끝 시각)
         self.tf = Buffer()
         self.tf_listener = TransformListener(self.tf, self)
         self.cmd = (0.0, 0.0)
@@ -192,6 +197,20 @@ class GuideNode(Node):
             return
         img, dets = full
         boxes = [b for b, _ in dets]
+        if fwd and self.guest_ignore is not None:
+            y0, until = self.guest_ignore
+            yaw = self.odom_yaw()
+            turned = (y0 is not None and yaw is not None
+                      and abs(math.atan2(math.sin(yaw - y0), math.cos(yaw - y0))) > self.guest_turn)
+            if turned or now >= until:
+                self.guest_ignore = None
+                if turned:
+                    self.get_logger().info('카메라: 손님 쪽에서 돌아섬 -> 앞 막힘 다시 봄')
+            else:
+                if self.near:
+                    self.gate.reset()
+                    self.set_near(False)
+                fwd = False              # 안내하던 손님이 바로 앞: 멈추지 않음 (사진 · 팝업도 안 보냄)
         if fwd:
             was_near = self.near
             spinning = abs(self.cmd[0]) < 0.01 and abs(self.cmd[1]) > self.spin_w
@@ -238,8 +257,9 @@ class GuideNode(Node):
             self.get_logger().warn(f'YOLO 실패: {e}')
             return None
 
-    def publish_snap(self, img, dets, near):
-        """멈춰 세운 화면에 박스 · 라벨을 그려 JPEG으로 /fleet/obstacle_snap (가로 480으로 줄임, 한 장 수십 KB)"""
+    def publish_snap(self, img, dets, near, guest=False):
+        """멈춰 세운 화면에 박스 · 라벨을 그려 JPEG으로 /fleet/obstacle_snap (가로 480으로 줄임, 한 장 수십 KB)
+        guest=True: 안내 손님을 찾은 화면 (막힘 아님). frame_id 앞에 'GUEST|' -> 서버 · 관제 화면이 '손님 확인'으로 표시"""
         try:
             import cv2
             out = img.copy()
@@ -247,8 +267,8 @@ class GuideNode(Node):
             best = 0.0
             for b, cf in dets:
                 x1, y1, x2, y2 = int(b[0] * w), int(b[1] * h), int(b[2] * w), int(b[3] * h)
-                hit = b == near                       # 멈춘 이유가 된 박스는 빨강, 나머지는 초록
-                color = (60, 60, 230) if hit else (80, 200, 80)
+                hit = b == near                       # 멈춘 이유가 된 박스는 빨강 (손님 찾음이면 진한 초록), 나머지는 초록
+                color = ((40, 160, 40) if guest else (60, 60, 230)) if hit else (80, 200, 80)
                 cv2.rectangle(out, (x1, y1), (x2, y2), color, 3 if hit else 2)
                 text = f'{self.class_name} {cf:.2f}'
                 (tw, th), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
@@ -264,7 +284,7 @@ class GuideNode(Node):
                 return
             m = CompressedImage()
             m.header.stamp = self.get_clock().now().to_msg()
-            m.header.frame_id = f'{self.class_name} {best:.2f}'
+            m.header.frame_id = ('GUEST|' if guest else '') + f'{self.class_name} {best:.2f}'
             m.format = 'jpeg'
             m.data = buf.tobytes()
             self.snap_pub.publish(m)
@@ -351,12 +371,17 @@ class GuideNode(Node):
                 continue
             last_t, got_frame = ft, True
             t0 = time.monotonic()
-            seen = bool(self.detect(msg))
+            full = self.persons_full(msg)
+            seen = bool(full and full[1])
             hits = hits + 1 if seen else 0
             if hits >= self.confirm:
                 if action == 'greet' and not self.welcome_first:
                     self.effect('welcome')
                 self.reply(rid, True, 'guest_seen')
+                if self.obstacle_snap:            # 관제 화면: '손님 확인' 팝업 (막힘과 구분)
+                    img, dets = full
+                    best = max(dets, key=lambda d: d[1])[0]
+                    self.publish_snap(img, dets, best, guest=True)
                 return
             time.sleep(max(0.0, period - (time.monotonic() - t0)))
         if cancel.is_set():
@@ -364,6 +389,8 @@ class GuideNode(Node):
         self.reply(rid, False, 'not_seen' if got_frame else 'no_camera')
 
     def reply(self, rid, ok, detail):
+        if ok:                           # 손님을 봤음 (greet · watch): 돌아서 출발할 때 그 손님에 안 멈추게
+            self.guest_ignore = (self.odom_yaw(), time.monotonic() + self.guest_ignore_sec)
         self.result_pub.publish(String(data=json.dumps({'id': rid, 'ok': ok, 'detail': detail})))
         self.get_logger().info(f'안내 결과 id {rid}: {"OK" if ok else "못 찾음"} ({detail})')
 

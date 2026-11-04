@@ -242,5 +242,6 @@ td:first-child { white-space: nowrap; color: var(--muted); }
 .snap-robot { display: inline-flex; align-items: center; gap: 6px; font-weight: 800; }
 .snap-node { color: var(--muted); font-size: 12px; margin-left: 2px; }
 .snap-head .icon-btn { margin-left: auto; width: 26px; height: 26px; }
+.badge.GUEST { background: var(--ok-weak); color: var(--ok); }
 .snap-img { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: cover; background: #1c1c1e; }
 .snap-foot { display: flex; justify-content: space-between; padding: 6px 12px 8px; font-size: 12px; color: var(--muted); }
