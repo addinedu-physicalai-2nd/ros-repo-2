@@ -1,0 +1,7 @@
+# 시뮬 로봇 목록. 실제 구성과 똑같이 로봇마다 ROS_DOMAIN_ID를 따로 둔다 (서버 50, pinky1=51 ...)
+#   start_node: 스폰 · AMCL 초기 위치 노드 (config/spawn_poses.yaml에 있는 STOP 노드: D1 D2 D3 P1 P2)
+#   x, y, yaw 를 직접 적으면 노드 대신 그 자리에 스폰
+robots:
+  - {id: pinky1, domain: 51, start_node: D1}
+  - {id: pinky2, domain: 52, start_node: D2}
+  - {id: pinky3, domain: 53, start_node: D3}

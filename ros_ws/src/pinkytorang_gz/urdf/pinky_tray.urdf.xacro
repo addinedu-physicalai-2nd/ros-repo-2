@@ -1,0 +1,220 @@
+<?xml version="1.0"?>
+<!--
+  핑키 프로 + 뒤 트레이(tray1.stl) Gazebo(Harmonic)용 로봇
+
+  - 몸체는 pinky_description의 insert_robot 매크로를 그대로 씀 (메시 · 관절 · 센서 위치 동일)
+  - 트레이: tray1.stl (69.4 x 82 x 23 mm). 걸쇠 쪽(STL +x 끝)을 몸체 뒷면(base_link x = -0.0745)에 붙임
+            -> 트레이 끝 = base_footprint 기준 x -0.145 (fleet_agent obstacle "뒤 바구니 0.15"와 맞음)
+  - gz 플러그인은 pinky_gz.urdf.xacro를 바탕으로, 토픽만 로봇별 접두어(gz_ns)를 붙이고
+    TF 프레임 이름(odom, base_footprint, rplidar_link ...)은 접두어 없이 둔다.
+    => 로봇마다 ROS_DOMAIN_ID를 따로 두는 실제 구성(pinky1=51 ...)과 ROS 쪽 토픽 · 프레임이 똑같다.
+
+  xacro 인자
+    gz_ns          gz 토픽 접두어 (예: "pinky1/"). 로봇 한 대면 "" 가능
+    with_tray      true/false
+    tray_z         트레이 바닥 높이 (base_link 기준, m). 기본 -0.012 = 바닥에서 16 mm
+    cam_width/height/rate  시뮬 카메라 (3대 돌리면 무거워서 기본 640x480 15Hz)
+    lamp_plugin    pinky_gz_sim 램프 플러그인 (pinky_gz_sim을 빌드했으면 true)
+    camera         false면 카메라 센서 없음 (가벼워짐. 시뮬 fleet_agent는 카메라를 안 씀)
+-->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="pinky">
+    <xacro:include filename="$(find pinky_description)/urdf/pinky.urdf.xacro"/>
+
+    <xacro:arg name="gz_ns" default=""/>
+    <xacro:arg name="with_tray" default="true"/>
+    <xacro:arg name="tray_z" default="-0.012"/>
+    <xacro:arg name="cam_tilt_deg" default="8"/>
+    <xacro:arg name="screen_tilt_deg" default="-25"/>
+    <xacro:arg name="cam_width" default="640"/>
+    <xacro:arg name="cam_height" default="480"/>
+    <xacro:arg name="cam_rate" default="15"/>
+    <xacro:arg name="lamp_plugin" default="false"/>
+    <xacro:arg name="camera" default="true"/>
+
+    <xacro:property name="ns" value="$(arg gz_ns)"/>
+
+    <!-- 1. 핑키 프로 몸체 (gz 블록은 아래에서 따로) -->
+    <xacro:insert_robot namespace="" is_sim="false"
+                        cam_tilt_deg="$(arg cam_tilt_deg)"
+                        screen_tilt_deg="$(arg screen_tilt_deg)"/>
+
+    <!-- 2. 뒤 트레이 -->
+    <xacro:if value="$(arg with_tray)">
+        <!-- STL 치수 (m) -->
+        <xacro:property name="tray_l" value="0.0694"/>
+        <xacro:property name="tray_w" value="0.082"/>
+        <xacro:property name="tray_h" value="0.023"/>
+        <xacro:property name="body_rear_x" value="-0.0745"/>   <!-- base_link.stl 뒷면 -->
+        <xacro:property name="tray_gap" value="0.001"/>
+        <xacro:property name="tray_mass" value="0.05"/>
+
+        <link name="tray_link">
+            <visual>
+                <origin xyz="0 0 0" rpy="0 0 0"/>
+                <geometry>
+                    <mesh filename="package://pinkytorang_gz/meshes/tray1.stl" scale="0.001 0.001 0.001"/>
+                </geometry>
+                <material name="tray_white"><color rgba="0.95 0.95 0.95 1"/></material>
+            </visual>
+            <collision>
+                <origin xyz="0 0 0" rpy="0 0 0"/>
+                <geometry>
+                    <mesh filename="package://pinkytorang_gz/meshes/tray1.stl" scale="0.001 0.001 0.001"/>
+                </geometry>
+            </collision>
+            <inertial>
+                <origin xyz="${tray_l/2} ${tray_w/2} 0.006" rpy="0 0 0"/>
+                <mass value="${tray_mass}"/>
+                <inertia ixx="${tray_mass/12*(tray_w*tray_w + tray_h*tray_h)}" ixy="0" ixz="0"
+                         iyy="${tray_mass/12*(tray_l*tray_l + tray_h*tray_h)}" iyz="0"
+                         izz="${tray_mass/12*(tray_l*tray_l + tray_w*tray_w)}"/>
+            </inertial>
+        </link>
+
+        <!-- STL 원점(모서리)을 몸체 뒤에: STL x=tray_l(걸쇠)이 body_rear_x - gap, y 가운데 -->
+        <joint name="tray_fixed_joint" type="fixed">
+            <parent link="base_link"/>
+            <child link="tray_link"/>
+            <origin xyz="${body_rear_x - tray_gap - tray_l} ${-tray_w/2} $(arg tray_z)" rpy="0 0 0"/>
+        </joint>
+
+        <!-- 트레이 위 물건 놓는 자리 (서빙 확인 · RViz용) -->
+        <link name="tray_top"/>
+        <joint name="tray_top_fixed_joint" type="fixed">
+            <parent link="tray_link"/>
+            <child link="tray_top"/>
+            <origin xyz="0.025 ${tray_w/2} 0.005" rpy="0 0 0"/>
+        </joint>
+
+        <gazebo reference="tray_link">
+            <mu1>0.8</mu1>
+            <mu2>0.8</mu2>
+        </gazebo>
+    </xacro:if>
+
+    <!-- 3. Gazebo 플러그인 · 센서 (pinky_gz.urdf.xacro 기준, 토픽에만 gz_ns) -->
+    <gazebo>
+        <plugin filename="gz-sim-diff-drive-system" name="gz::sim::systems::DiffDrive">
+            <left_joint>l_wheel_joint</left_joint>
+            <right_joint>r_wheel_joint</right_joint>
+            <wheel_separation>0.0961</wheel_separation>
+            <wheel_radius>0.028</wheel_radius>
+            <min_velocity>-1.0</min_velocity>
+            <max_velocity>1.0</max_velocity>
+            <min_acceleration>-2.0</min_acceleration>
+            <max_acceleration>2.0</max_acceleration>
+            <topic>${ns}cmd_vel</topic>
+            <odom_topic>${ns}odom</odom_topic>
+            <frame_id>odom</frame_id>
+            <child_frame_id>base_footprint</child_frame_id>
+            <odom_publisher_frequency>30</odom_publisher_frequency>
+            <tf_topic>${ns}tf</tf_topic>
+        </plugin>
+
+        <plugin filename="gz-sim-joint-state-publisher-system" name="gz::sim::systems::JointStatePublisher">
+            <topic>${ns}joint_states</topic>
+            <joint_name>l_wheel_joint</joint_name>
+            <joint_name>r_wheel_joint</joint_name>
+        </plugin>
+
+        <xacro:if value="$(arg lamp_plugin)">
+            <plugin filename="gz-sim-lamp-control-system" name="pinky_gz_sim::LampControlPlugin">
+                <link>robot_lamp</link>
+            </plugin>
+        </xacro:if>
+    </gazebo>
+
+    <gazebo reference="l_wheel">
+        <self_collide>0</self_collide>
+        <mu1>200</mu1>
+        <mu2>200</mu2>
+        <kp>10000000.0</kp>
+        <kd>1.0</kd>
+    </gazebo>
+
+    <gazebo reference="r_wheel">
+        <self_collide>0</self_collide>
+        <mu1>200</mu1>
+        <mu2>200</mu2>
+        <kp>10000000.0</kp>
+        <kd>1.0</kd>
+    </gazebo>
+
+    <gazebo reference="caster_wheel">
+        <self_collide>0</self_collide>
+        <mu1>0.1</mu1>
+        <mu2>0.1</mu2>
+        <kp>10000000.0</kp>
+        <kd>1.0</kd>
+    </gazebo>
+
+    <gazebo reference="robot_lamp_mount_fixed_joint">
+        <disableFixedJointLumping>true</disableFixedJointLumping>
+    </gazebo>
+
+    <gazebo reference="rplidar_link">
+        <sensor name="gpu_lidar" type="gpu_lidar">
+            <topic>${ns}scan</topic>
+            <update_rate>10</update_rate>
+            <gz_frame_id>rplidar_link</gz_frame_id>
+            <lidar>
+                <scan>
+                    <horizontal>
+                        <samples>640</samples>
+                        <min_angle>${-pi}</min_angle>
+                        <max_angle>${pi}</max_angle>
+                    </horizontal>
+                    <vertical>
+                        <samples>1</samples>
+                        <resolution>0.01</resolution>
+                        <min_angle>0</min_angle>
+                        <max_angle>0</max_angle>
+                    </vertical>
+                </scan>
+                <range>
+                    <min>0.05</min>
+                    <max>12.0</max>
+                    <resolution>0.03</resolution>
+                </range>
+                <noise>
+                    <type>gaussian</type>
+                    <mean>0.0</mean>
+                    <stddev>0.02</stddev>
+                </noise>
+            </lidar>
+            <visualize>false</visualize>
+        </sensor>
+    </gazebo>
+
+    <xacro:if value="$(arg camera)">
+    <gazebo reference="front_camera_link">
+        <sensor name="camera" type="camera">
+            <camera>
+                <horizontal_fov>1.1519</horizontal_fov>
+                <image>
+                    <width>$(arg cam_width)</width>
+                    <height>$(arg cam_height)</height>
+                </image>
+                <clip>
+                    <near>0.02</near>
+                    <far>20</far>
+                </clip>
+            </camera>
+            <always_on>1</always_on>
+            <update_rate>$(arg cam_rate)</update_rate>
+            <visualize>false</visualize>
+            <topic>${ns}camera/image_raw</topic>
+            <gz_frame_id>front_camera_link</gz_frame_id>
+        </sensor>
+    </gazebo>
+    </xacro:if>
+
+    <gazebo reference="imu_link">
+        <sensor name="imu" type="imu">
+            <always_on>1</always_on>
+            <update_rate>100</update_rate>
+            <topic>${ns}imu</topic>
+            <gz_frame_id>imu_link</gz_frame_id>
+        </sensor>
+    </gazebo>
+</robot>

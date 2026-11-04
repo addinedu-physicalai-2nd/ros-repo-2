@@ -1,0 +1,32 @@
+# 자동 생성: tools/gen_world.py. 스폰 자리 (map = world 프레임)
+# shift_m: 벽과 안 겹치게 로봇 앞쪽으로 민 거리. AMCL 초기 위치는 이 값으로 넣는다
+P2:
+  x: 0.268
+  y: -0.384
+  yaw: 1.625
+  shift_m: 0.0
+  ok: true
+P1:
+  x: 0.251
+  y: -0.905
+  yaw: 0.071
+  shift_m: 0.0
+  ok: true
+D1:
+  x: 1.8838
+  y: 0.3814
+  yaw: -0.077
+  shift_m: 0.06
+  ok: true
+D2:
+  x: 0.0342
+  y: -0.0111
+  yaw: -0.022
+  shift_m: 0.011
+  ok: true
+D3:
+  x: 0.06
+  y: 0.1243
+  yaw: -0.012
+  shift_m: 0.055
+  ok: true
