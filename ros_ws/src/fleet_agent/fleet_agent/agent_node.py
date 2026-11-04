@@ -79,7 +79,9 @@ class FleetAgent(Node):
                              check_every=p('guide_check_every_node', False).value,
                              backoff_m=p('person_backoff_m', 0.12).value, backoff_v=p('person_backoff_speed', 0.05).value,
                              backoff_sec=p('person_backoff_sec', 30.0).value,
-                             backoff_turn_deg=p('person_backoff_turn_deg', 90.0).value)
+                             backoff_turn_deg=p('person_backoff_turn_deg', 90.0).value,
+                             recover_sec=p('lidar_recover_sec', 3.0).value, recover_m=p('lidar_recover_m', 0.08).value,
+                             recover_max=p('lidar_recover_max', 2).value)
         self.driver.last_node = self.start_node
         self.driver.leave_from = self.start_node   # 켤 때 선 노드에 leave(언도킹 등)가 있으면 첫 출발 때 먼저
 

@@ -55,6 +55,12 @@ class ObstacleNode(Node):
         self.spin_w = p('spin_ignore_w', 0.05).value
         self.cmd = (0.0, 0.0, -1.0)    # v, w, 받은 시각
         self.spinning = False
+        # 회전이 막 끝났을 때 (노드에서 돌고 출발): 벽 모서리가 잠깐 멈춤 거리 안에 들어와 멈춤 · 출발을 반복하던 것
+        #   -> 회전 끝 뒤 after_spin_sec 동안은 LiDAR 막힘이 after_spin_confirm초 이어져야 막힘
+        self.after_spin = p('after_spin_sec', 1.0).value
+        self.after_spin_confirm = p('after_spin_confirm_sec', 0.3).value
+        self.spin_end = -1e9
+        self.lidar_since = None
         self.direction = 'STOP'
         self.person_hold = p('person_hold_sec', 2.0).value   # 카메라가 사람을 본 결과를 이만큼 믿음
         self.person_t = -1e9
@@ -104,10 +110,18 @@ class ObstacleNode(Node):
             self.spinning = spinning
             self.get_logger().info('제자리 회전 -> 앞 막힘 안 봄' if spinning else '회전 끝 -> 다시 봄')
             self.cls.reset()
+            if not spinning:
+                self.spin_end = now
         if self.direction in ('FORWARD', 'REVERSE') and not spinning:
             rev = self.direction == 'REVERSE'
             dist = self.nearest(scan, math.pi if rev else 0.0)
             blocked = dist < (self.stop_rear if rev else self.stop_front)
+            if blocked:
+                self.lidar_since = now if self.lidar_since is None else self.lidar_since
+                if now - self.spin_end < self.after_spin and now - self.lidar_since < self.after_spin_confirm:
+                    blocked = False      # 회전 막 끝남: 잠깐 스친 것인지 조금 더 봄
+            else:
+                self.lidar_since = None
         cam = self.direction == 'FORWARD' and not spinning and self.camera.active(now)   # 카메라는 앞만 봄
         if cam != self.cam_was:
             self.cam_was = cam

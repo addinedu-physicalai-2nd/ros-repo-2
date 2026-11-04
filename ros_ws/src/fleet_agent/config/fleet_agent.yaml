@@ -24,6 +24,9 @@ fleet_agent:
     guide_check_every_node: false # true = 꺾임과 상관없이 지나가는 노드마다 뒤돌아 손님 확인 (도착지는 빼고)
     block_wait_sec: 10.0         # 장애물(사람 · 물건 모두): 이만큼 기다렸다가 서버에 BLOCKED -> 서버가 막힌 노드를 피해 다른 길
                                  # 그 전에 비키면 그대로 감. 0 = 예전 방식 (아래 종류별 시간)
+    lidar_recover_sec: 3.0       # 라이다 막힘(사람 아님)이 이만큼 안 풀리면 조금 물러났다 다시 Nav2 (좁은 곳 벽). 0 = 안 함
+    lidar_recover_m: 0.08
+    lidar_recover_max: 2         # 한 칸에서 이만큼까지, 그 뒤로는 평소대로 기다렸다 BLOCKED
     person_backoff_m: 0.12       # 카메라 사람으로 막혔던 자리에서 크게 돌아 나갈 때 먼저 곧게 후진 (돌다 몸으로 치는 것). 0 = 안 함
     person_backoff_speed: 0.05
     person_backoff_sec: 30.0     # 막힌 뒤 이 안에 새 길로 나갈 때만
@@ -54,6 +57,8 @@ obstacle:
     static_sec: 2.0
     person_hold_sec: 2.0         # guide 노드가 '사람 보임'을 보낸 뒤 이만큼 PERSON으로 믿음
     camera_block: true           # guide 노드 카메라가 '바로 앞 손님'을 보면 LiDAR에 안 잡혀도 막힘 (작은 레고 사람)
+    after_spin_sec: 1.0          # 회전 끝 뒤 이 시간 동안은 LiDAR 막힘이 아래만큼 이어져야 멈춤 (벽 모서리 깜빡임)
+    after_spin_confirm_sec: 0.3
     camera_hold_sec: 1.0         # 그 결과가 이만큼 안 오면 저절로 풀림
 
 camera:

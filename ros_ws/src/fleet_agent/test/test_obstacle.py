@@ -21,7 +21,7 @@ N1, N2, N3, N4 = ('N1', 0.0, 0.0, 0.0), ('N2', 1.0, 0.0, 0.0), ('N3', 0.0, 1.0, 
 
 def make(x=0.0, y=0.0, yaw=0.0):
     r = FakeRobot(x, y, yaw)
-    d = Driver(r, {}, reverse=ReverseControl(speed=0.1), policy=BlockPolicy(wait=10.0))
+    d = Driver(r, {}, reverse=ReverseControl(speed=0.1), policy=BlockPolicy(wait=10.0), recover_sec=0.0)   # 물러나기는 따로 시험
     d.last_drive = FORWARD
     d.last_node = 'N1'
     r.driver = d
@@ -128,3 +128,40 @@ def test_policy_person_waits_30s_without_detour():
             reports.append((round(i * 0.1, 1), rep))
     assert reports == [(30.0, 'PERSON')]
     assert asks[35] and asks[150] and asks[295] and not asks[310]
+
+
+def test_lidar_stuck_backs_off_and_retries_then_reports():
+    # 좁은 곳 벽(STATIC)이 안 풀림 -> 3초마다 8 cm 물러났다 다시 (2번) -> 그래도 막히면 평소대로 10초 뒤 BLOCKED
+    r = FakeRobot(0.0, 0.0, 0.0)
+    d = Driver(r, {}, reverse=ReverseControl(speed=0.1), policy=BlockPolicy(wait=10.0),
+               recover_sec=3.0, recover_m=0.08, recover_max=2)
+    d.last_drive, d.last_node, r.driver = FORWARD, 'N1', d
+    d.on_move(1, False, FORWARD, [N2], False, 'N2')
+    backs, vs, prev = [], [], {'p': ''}
+
+    def hook(t):
+        if d.phase == 'backoff':
+            vs.append(r.v)
+            if prev['p'] != 'backoff':
+                backs.append(t)
+            d.set_obstacle('')                 # 뒤는 비어 있음
+        else:
+            d.set_obstacle('STATIC' if t >= 1.0 else '')
+        prev['p'] = d.phase
+    run(r, d, 40, hook=hook)
+    assert len(backs) == 2 and min(vs) < 0
+    assert [e for e in r.events if e[0] == EV_BLOCKED], '물러나기 2번 뒤에는 BLOCKED'
+
+
+def test_lidar_recover_skips_moving_person():
+    r = FakeRobot(0.0, 0.0, 0.0)
+    d = Driver(r, {}, reverse=ReverseControl(speed=0.1), policy=BlockPolicy(wait=10.0), recover_sec=3.0)
+    d.last_drive, d.last_node, r.driver = FORWARD, 'N1', d
+    d.on_move(1, False, FORWARD, [N2], False, 'N2')
+    phases = set()
+
+    def hook(t):
+        phases.add(d.phase)
+        d.set_obstacle('DYNAMIC' if 1.0 <= t < 8.0 else '')
+    run(r, d, 20, hook=hook)
+    assert 'backoff' not in phases

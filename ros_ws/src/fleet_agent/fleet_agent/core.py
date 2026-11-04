@@ -424,8 +424,18 @@ class Driver:
     def __init__(self, io, stops, pass_tol=0.08, yaw_tol=0.15, done_grace=0.5, reverse=None, policy=None,
                  nav_retries=1, check_turn_deg=45.0, check_gap=0.8, corridor=True,
                  loc_fwd=0.15, loc_speed=0.05, loc_spin_deg=360.0, loc_w=0.6, loc_settle=1.0, nav_ok_tol=0.10,
-                 check_every=False, backoff_m=0.12, backoff_v=0.05, backoff_sec=30.0, backoff_turn_deg=90.0):
+                 check_every=False, backoff_m=0.12, backoff_v=0.05, backoff_sec=30.0, backoff_turn_deg=90.0,
+                 recover_sec=3.0, recover_m=0.08, recover_max=2):
         self.io = io
+        # 라이다로 막혀 섰는데 (벽이 가까운 좁은 곳 등, STATIC · UNKNOWN만. 움직이는 사람 DYNAMIC · 카메라 PERSON은 기다림)
+        #   recover_sec 넘게 안 풀리면: recover_m 곧게 후진했다가 다시 Nav2
+        #   (Nav2가 조금 뒤에서 다시 경로를 짜서 빠져나감). 한 자리에서 recover_max번까지, 그 뒤로는 평소대로 BLOCKED
+        self.recover_sec, self.recover_m, self.recover_max = recover_sec, recover_m, recover_max
+        self.recover_tries = 0
+        self.hold_since = 0.0
+        self.backoff_dist = backoff_m
+        self.backoff_then = 'begin'   # 후진 끝나고: begin = 이 노드 출발부터 (_begin_move) / resume = 가던 Nav2 다시
+        self.backoff_start = 0.0
         # 카메라(PERSON)로 막혀 섰던 자리에서 크게 돌아 다른 길로 갈 때: 제자리에서 돌면 몸(바구니 모서리)이 바로 앞
         # 손님을 침 -> 먼저 backoff_m 곧게 후진 (뒤 LiDAR로 확인), 그다음 Nav2. 막힌 뒤 backoff_sec 안 · 그 자리 근처에서만
         self.backoff_m, self.backoff_v = backoff_m, backoff_v
@@ -704,8 +714,21 @@ class Driver:
             if self.obstacle:
                 if not self.holding:
                     self.holding = True
+                    self.hold_since = now
                     self._stop_motion(keep=True, keep_dir=True)  # 방향은 그대로 둬야 Obstacle 노드가 계속 본다
                     self.io.log(f'장애물({self.obstacle}) -> 정지')
+                if (self.obstacle in ('STATIC', 'UNKNOWN') and self.phase == 'nav' and self.recover_sec > 0
+                        and self.recover_tries < self.recover_max and not report and not self.policy.reported
+                        and now - self.hold_since >= self.recover_sec):
+                    # 라이다 막힘이 안 풀림 (좁은 곳 벽 등): 조금 물러났다가 다시 (Nav2가 뒤에서 경로를 다시 짬)
+                    self.recover_tries += 1
+                    self.holding = False
+                    self.io.lcd_override(None)
+                    self.policy.update(now, '')
+                    self.io.log(f'라이다 막힘({self.obstacle}) {now - self.hold_since:.0f}초 -> '
+                                f'{self.recover_m * 100:.0f} cm 물러났다 다시 ({self.recover_tries}/{self.recover_max})')
+                    self._start_backoff(pose, self.recover_m, 'resume')
+                    return
                 self.io.lcd_override('지나갈게요' if ask else None)
                 if report:
                     nxt = self.cur.node_id if self.cur else ''
@@ -747,11 +770,18 @@ class Driver:
             self._tick_nav(pose)
         elif self.phase == 'backoff':
             d = math.hypot(pose[0] - self.backoff_from[0], pose[1] - self.backoff_from[1])
-            if d >= self.backoff_m or now >= self.backoff_until or self.obstacle:
+            rear = self.obstacle and now - self.backoff_start >= 0.3    # 처음 0.3초는 앞 막힘 결과가 남아 있을 수 있음
+            if d >= self.backoff_dist or now >= self.backoff_until or rear:
                 self.io.cmd_vel(0.0, 0.0)
-                if self.obstacle:
+                if rear:
                     self.io.log(f'후진 중 뒤에 장애물 -> {d * 100:.0f} cm에서 그만')
-                self._begin_move(pose)   # person_at을 비웠으니 이번엔 바로 Nav2
+                if self.backoff_then == 'resume':
+                    self.phase = 'nav'
+                    self.nav_state = 'running'
+                    self.io.direction('FORWARD')
+                    self.io.nav_go(*self._nav_xy(), self._nav_yaw())
+                else:
+                    self._begin_move(pose)   # person_at을 비웠으니 이번엔 바로 Nav2
             else:
                 self.io.cmd_vel(-self.backoff_v, 0.0)
         elif self.phase == 'reverse':
@@ -992,12 +1022,21 @@ class Driver:
                 or turn < self.backoff_turn):
             return False
         self.person_at = None         # 한 번만
+        self.io.log(f'앞 손님 옆에서 {math.degrees(turn):.0f}° 돌아야 함 -> 먼저 {self.backoff_m * 100:.0f} cm 후진')
+        self._start_backoff(pose, self.backoff_m, 'begin')
+        return True
+
+    def _start_backoff(self, pose, dist, then):
+        """곧게 dist 후진 (뒤 LiDAR로 확인). 끝나면 then: begin = _begin_move / resume = 가던 Nav2 다시"""
+        self.io.cmd_vel(0.0, 0.0)
+        self.io.nav_cancel()
         self.backoff_from = (pose[0], pose[1])
-        self.backoff_until = self.now + max(2.0, 3.0 * self.backoff_m / max(self.backoff_v, 1e-3))
+        self.backoff_dist = dist
+        self.backoff_then = then
+        self.backoff_start = self.now
+        self.backoff_until = self.now + max(2.0, 3.0 * dist / max(self.backoff_v, 1e-3))
         self.phase = 'backoff'
         self.io.direction('REVERSE')  # 뒤 LiDAR로 확인 (obstacle 노드)
-        self.io.log(f'앞 손님 옆에서 {math.degrees(turn):.0f}° 돌아야 함 -> 먼저 {self.backoff_m * 100:.0f} cm 후진')
-        return True
 
     def _dock_turnback(self, pose):
         """도크(D1 · D2 · D3)로 들어갈 차례인데 바로 다음이 지금 노드로 되돌아오는 길 (복귀 중 새 안내 · 서빙이 붙음):
@@ -1109,6 +1148,7 @@ class Driver:
                            'node': self.cur.node_id if self.cur else self.last_node})
 
     def _reached(self, pose):
+        self.recover_tries = 0        # 다음 칸에서는 다시 물러나기 가능
         step = self.cur
         self.last_step = step
         if self.realigned != step.node_id:
