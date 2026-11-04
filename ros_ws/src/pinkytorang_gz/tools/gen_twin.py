@@ -67,7 +67,8 @@ wall('corridor_partition', 0.40, -0.85, 0.40, 0.33)
 wall('entrance_wall', 1.67, -0.43, 1.67, Y1)
 
 # D2 · D3 칸 (중심 간격 14.6 -> 칸 폭 14.6)
-for n, y in (('dock_div_s', -0.094), ('dock_div_m', 0.052), ('dock_div_n', 0.198)):
+# 실제 세트엔 D2 · D3 사이 · D3 북쪽 칸막이가 없음 -> 주방 쪽(D2 남쪽) 하나만
+for n, y in (('dock_div_s', -0.094),):
     wall(n, X0, y, KX, y, h=0.19)
 
 # 테이블: 실제 도면 table1.stl (165 x 110 x 150 mm) 치수대로 상자로 세움 (STL은 뒤집혀 그려져 면이 빠져 보여서 안 씀). 자리는 gen_world.py와 같음
