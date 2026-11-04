@@ -6,7 +6,7 @@
   - 인쇄물 텍스처 (tools/twin_tex): KITCHEN 띠 · OPEN KITCHEN 카운터 · 메뉴판 · 충전 도크 D1~D3 · E자 테두리 종이
   - 바닥 테이프 (E자, N15 · N16 가로선), 손님 대기선 (D1 통로 입구, 노랑), AprilTag 마커 1~6 · 테이블 다리 11~62 (실제 인쇄물)
   - D1 옆 키오스크 테이블 + 키오스크 화면 (동쪽을 봄)
-  - 테이블 T1~T6 + D1 옆 키오스크 테이블 = model://pinky_table (gen_world.py와 같은 자리), 상판에 주문 QR 카드
+  - 테이블 T1~T6 + D1 옆 키오스크 테이블 (table1.stl 치수, gen_world.py와 같은 자리), 상판에 주문 QR 카드
 
   python3 tools/gen_twin.py                       # -> worlds/pinkytorang_twin.sdf + worlds/twin_meshes/
   python3 tools/gen_twin.py --json /tmp/twin.json # (미리보기용 장면 데이터도)
@@ -70,12 +70,12 @@ wall('entrance_wall', 1.67, -0.43, 1.67, Y1)
 for n, y in (('dock_div_s', -0.094), ('dock_div_m', 0.052), ('dock_div_n', 0.198)):
     wall(n, X0, y, KX, y, h=0.19)
 
-# 테이블: 실제 도면 table1.stl (165 x 110 x 150 mm) = model://pinky_table. 자리는 gen_world.py와 같음
+# 테이블: 실제 도면 table1.stl (165 x 110 x 150 mm) 치수대로 상자로 세움 (STL은 뒤집혀 그려져 면이 빠져 보여서 안 씀). 자리는 gen_world.py와 같음
 #   (node_graph T 좌표 = 통로 쪽 짧은 변 가운데 -> -y로 165 mm). K = D1 옆 키오스크 테이블 (맵 v5 속 빈 사각형 자리)
 TL, TW, TH = 0.165, 0.110, 0.150
 T = {n['table']: (n['x'], n['y'] - TL / 2) for n in GRAPH['nodes'] if n.get('table')}
 T['K'] = (1.68 + TW / 2 + 0.003, Y1 - WALL_T / 2 - TL / 2 - 0.003)   # D1 통로 북서 모서리
-for k, (x, y) in T.items():     # 미리보기용 상자 (SDF에는 tbl_ 대신 pinky_table include). 치수 = table1.stl
+for k, (x, y) in T.items():     # 상판 2 mm · 앞치마(바닥 10~14.8 cm, 라이다 높이에 걸림) · 다리 22 mm. 치수 = table1.stl
     box(f'tbl_{k}_top', 'table', x - TW / 2, x + TW / 2, y - TL / 2, y + TL / 2, TH - 0.002, TH)
     box(f'tbl_{k}_apron', 'table', x - 0.045, x + 0.045, y - 0.0725, y + 0.0725, 0.10, TH - 0.002)
     for dx in (-0.038, 0.038):
@@ -335,7 +335,7 @@ def sdf(out):
     os.makedirs(os.path.join(out, 'twin_meshes'), exist_ok=True)
     parts = []
     for i, (n, col, x, y, z, sx, sy, sz, yaw, coll) in enumerate(boxes):
-        if n.startswith(('pinky_', 'tbl_')):
+        if n.startswith('pinky_'):
             continue
         r, g, b = hexrgb(C[col])
         cl = f'<collision name="c"><geometry><box><size>{sx:.4f} {sy:.4f} {sz:.4f}</size></box></geometry></collision>' if coll else ''
@@ -354,9 +354,6 @@ def sdf(out):
         shutil.copy(os.path.join(HERE, 'twin_tex', tex + '.png'), os.path.join(out, 'twin_meshes', n + '.png'))
         parts.append(f'<model name="print_{n}"><static>true</static><pose>{x:.4f} {y:.4f} {z:.4f} 0 0 {yaw:.4f}</pose><link name="l">'
                      f'<visual name="v"><geometry><mesh><uri>model://pinkytorang_gz/worlds/twin_meshes/{n}.obj</uri></mesh></geometry></visual></link></model>')
-    for k, (x, y) in T.items():
-        parts.append(f'<include><uri>model://pinky_table</uri><name>table_{k}</name>'
-                     f'<pose>{x:.4f} {y:.4f} 0 0 0 {math.pi / 2:.6f}</pose></include>')
     body = '\n    '.join(parts)
     with open(os.path.join(out, 'pinkytorang_twin.sdf'), 'w', encoding='utf-8') as f:
         f.write(f'''<?xml version="1.0"?>
